@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { loadPeople } from "@/lib/people";
-import { daysUntil, dueLabel, nextReportDate, todayISO } from "@/lib/reporting";
+import { addDays, daysUntil, dueLabel, nextReportDate, todayISO } from "@/lib/reporting";
 import { formatUSD, projectionMonths, type PaymentPlan } from "@/lib/payments";
 import { attentionRows, monthItems } from "@/lib/dues";
 import { loadPaymentsData } from "@/lib/payments-data";
@@ -28,7 +28,7 @@ type Project = {
 
 export default async function Home() {
   const month = projectionMonths(todayISO(), 1)[0];
-  const [projectsRes, peopleRes, payments, onboardedRes] = await Promise.all([
+  const [projectsRes, peopleRes, payments, onboardedRes, changesRes] = await Promise.all([
     supabase
       .from("projects")
       .select(
@@ -45,9 +45,16 @@ export default async function Home() {
       .select("id", { count: "exact", head: true })
       .gte("onboarding_date", month.start)
       .lte("onboarding_date", month.end),
+    // Status changes made this month (India time): how many projects were halted or lost (ended).
+    supabase
+      .from("project_status_log")
+      .select("status")
+      .gte("changed_at", `${month.start}T00:00:00+05:30`)
+      .lt("changed_at", `${addDays(month.end, 1)}T00:00:00+05:30`)
+      .returns<{ status: string }[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? onboardedRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? onboardedRes.error ?? changesRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -76,6 +83,9 @@ export default async function Home() {
 
   // Revenue for the current month only: real amounts from the ledger, plus scheduled payments of active
   // projects the ledger hasn't opened yet.
+  const onboarded = onboardedRes.count ?? 0;
+  const halted = (changesRes.data ?? []).filter((c) => c.status === "halted").length;
+  const lost = (changesRes.data ?? []).filter((c) => c.status === "ended").length;
   const monthRows = monthItems(month, active, ledger, labelOf);
   const monthExpected = monthRows.reduce((sum, it) => sum + it.amount, 0);
   const monthReceived = monthRows.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
@@ -120,9 +130,6 @@ export default async function Home() {
               </Link>
             </CardDescription>
             <CardTitle className="text-3xl">{projects.length}</CardTitle>
-            <Link href="/onboarding" className="text-xs text-muted-foreground underline-offset-4 hover:underline">
-              {onboardedRes.count ?? 0} onboarded in {month.label}
-            </Link>
           </CardHeader>
         </Card>
         {managers.map((m) => (
@@ -204,21 +211,53 @@ export default async function Home() {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>
-            Revenue this month
-            <span className="ml-2 text-sm font-normal text-muted-foreground">{month.label}</span>
-          </CardTitle>
-          <CardDescription>From the payment ledger (USD).</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <RevenueSummary monthLabel={month.label} expected={monthExpected} received={monthReceived} overdue={overdueTotal} />
-          <Link href="/payments" className="inline-block text-sm font-medium underline-offset-4 hover:underline">
-            See every payment and past months →
-          </Link>
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="sm:flex sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <CardTitle>
+                Onboarding
+                <span className="ml-2 text-sm font-normal text-muted-foreground">{month.label}</span>
+              </CardTitle>
+              <CardDescription>Halted and lost count the status changes made this month.</CardDescription>
+            </div>
+            <Link href="/onboarding" className="text-sm font-medium underline-offset-4 hover:underline">
+              Onboarding history →
+            </Link>
+          </CardHeader>
+          <CardContent>
+            <dl className="grid grid-cols-3 gap-4">
+              <div>
+                <dt className="text-sm text-muted-foreground">Onboarded</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{onboarded}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">Halted</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{halted}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">Lost (ended)</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{lost}</dd>
+              </div>
+            </dl>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Revenue this month
+              <span className="ml-2 text-sm font-normal text-muted-foreground">{month.label}</span>
+            </CardTitle>
+            <CardDescription>From the payment ledger (USD).</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <RevenueSummary compact monthLabel={month.label} expected={monthExpected} received={monthReceived} overdue={overdueTotal} />
+            <Link href="/payments" className="inline-block text-sm font-medium underline-offset-4 hover:underline">
+              See every payment and past months →
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {managerWorkload.length > 0 && (

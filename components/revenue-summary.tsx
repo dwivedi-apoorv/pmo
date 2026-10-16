@@ -6,16 +6,19 @@ export function RevenueSummary({
   expected,
   received,
   overdue,
+  compact = false,
 }: {
   monthLabel: string;
   expected: number;
   received: number;
   overdue: number;
+  /** Two columns instead of four, for half-width cards. */
+  compact?: boolean;
 }) {
   const pct = expected > 0 ? Math.round((received / expected) * 100) : 0;
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <dl className={`grid grid-cols-2 gap-4 ${compact ? "" : "lg:grid-cols-4"}`}>
         <div>
           <dt className="text-sm text-muted-foreground">Expected this month</dt>
           <dd className="text-2xl font-semibold tabular-nums">{formatUSD(expected)}</dd>
