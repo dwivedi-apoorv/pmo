@@ -1,7 +1,11 @@
+"use client";
+
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/simple-select";
 import { PAYMENT_METHODS, PAYMENT_TERMS, type PaymentPlan } from "@/lib/payments";
+import { todayISO } from "@/lib/reporting";
 
 export type ProjectValues = {
   name: string;
@@ -12,16 +16,27 @@ export type ProjectValues = {
 } & PaymentPlan;
 
 // Shared by the create and edit dialogs so the two never drift apart.
+// Creating (no `values`): dates are pre-filled. Onboarding and reporting start as today, and the
+// first payment date follows the onboarding date until you pick a payment date yourself.
 export function ProjectFields({ values }: { values?: ProjectValues }) {
+  const isNew = !values;
+  const today = todayISO();
+
+  const [onboarding, setOnboarding] = useState(values?.onboarding_date ?? today);
+  const [payment, setPayment] = useState(isNew ? today : (values.payment_date ?? ""));
+  const [paymentEdited, setPaymentEdited] = useState(false);
+
   return (
     <>
-      <div className="grid gap-1.5">
-        <Label htmlFor="name">Project name</Label>
-        <Input id="name" name="name" defaultValue={values?.name} required />
-      </div>
-      <div className="grid gap-1.5">
-        <Label htmlFor="client_name">Client name</Label>
-        <Input id="client_name" name="client_name" defaultValue={values?.client_name} required />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-1.5">
+          <Label htmlFor="name">Project name</Label>
+          <Input id="name" name="name" defaultValue={values?.name} required />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="client_name">Client name</Label>
+          <Input id="client_name" name="client_name" defaultValue={values?.client_name} required />
+        </div>
       </div>
       <div className="grid gap-1.5">
         <Label htmlFor="website">Website</Label>
@@ -33,14 +48,18 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
           required
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="grid gap-1.5">
           <Label htmlFor="onboarding_date">Date of onboarding</Label>
           <Input
             id="onboarding_date"
             name="onboarding_date"
             type="date"
-            defaultValue={values?.onboarding_date}
+            value={onboarding}
+            onChange={(e) => {
+              setOnboarding(e.target.value);
+              if (isNew && !paymentEdited) setPayment(e.target.value);
+            }}
             required
           />
         </div>
@@ -50,7 +69,7 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
             id="reporting_date"
             name="reporting_date"
             type="date"
-            defaultValue={values?.reporting_date}
+            defaultValue={values?.reporting_date ?? today}
             required
           />
         </div>
@@ -61,14 +80,18 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
 
       <div className="grid gap-3 border-t pt-4">
         <p className="text-sm font-medium">Payment</p>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-4">
           <div className="grid gap-1.5">
             <Label htmlFor="payment_date">First payment date</Label>
             <Input
               id="payment_date"
               name="payment_date"
               type="date"
-              defaultValue={values?.payment_date ?? ""}
+              value={payment}
+              onChange={(e) => {
+                setPayment(e.target.value);
+                setPaymentEdited(true);
+              }}
               required
             />
           </div>
@@ -91,8 +114,6 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
               />
             </div>
           </div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
           <div className="grid gap-1.5">
             <Label>Term</Label>
             <SimpleSelect

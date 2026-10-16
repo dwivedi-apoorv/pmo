@@ -11,6 +11,8 @@ import {
   type PaymentPlan,
 } from "@/lib/payments";
 import type { EmployeeOption } from "@/components/employee-select";
+import { PageHeader } from "@/components/page-header";
+import { WorkloadCard, type WorkloadRow } from "@/components/workload-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -43,9 +45,9 @@ export default async function Home() {
   const error = projectsRes.error ?? peopleRes.error;
   if (error) {
     return (
-      <div className="w-full p-6">
-        <h1 className="text-2xl font-semibold">PMO Dashboard</h1>
-        <p className="mt-2 text-destructive">Could not load data: {error.message}</p>
+      <div className="w-full space-y-6 p-4 sm:p-6">
+        <PageHeader title="Dashboard" />
+        <p className="text-destructive">Could not load data: {error.message}</p>
       </div>
     );
   }
@@ -68,18 +70,36 @@ export default async function Home() {
     })
     .sort((a, b) => a.days - b.days || a.p.name.localeCompare(b.p.name));
 
+  const pctOf = (count: number) => (projects.length ? Math.round((count / projects.length) * 100) : 0);
+  const byWorkload = (a: WorkloadRow, b: WorkloadRow) => b.count - a.count || a.name.localeCompare(b.name);
+  const activeWithRole = (role: string) =>
+    peopleRes.people.filter((e) => e.is_active && e.role?.trim().toLowerCase() === role);
+
+  // SEO specialists: share of active projects they're assigned to. A project can have several
+  // people, so these percentages are per person and don't add up to 100.
+  const seoWorkload: WorkloadRow[] = activeWithRole("seo specialist")
+    .map((e) => {
+      const count = projects.filter((p) => p.project_assignments.some((a) => a.employees?.id === e.id)).length;
+      return { id: e.id, name: e.name, slug: e.slug, count, pct: pctOf(count) };
+    })
+    .sort(byWorkload);
+
+  // Project managers: share of active projects they run. One manager per project.
+  const managerWorkload: WorkloadRow[] = activeWithRole("project manager")
+    .map((e) => {
+      const count = projects.filter((p) => p.project_manager_id === e.id).length;
+      return { id: e.id, name: e.name, slug: e.slug, count, pct: pctOf(count) };
+    })
+    .sort(byWorkload);
+  const withoutManager = projects.filter((p) => !p.project_manager_id).length;
+
   const managers = peopleRes.people.filter(
     (e) => e.is_active && e.role?.trim().toLowerCase() === "project manager"
   );
 
   return (
     <div className="w-full space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">PMO Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Reports and payments coming up</p>
-        </div>
-      </div>
+      <PageHeader title="Dashboard" description="Reports and payments coming up" />
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card size="sm">
@@ -184,6 +204,32 @@ export default async function Home() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {managerWorkload.length > 0 && (
+          <WorkloadCard
+            title="Project manager workload"
+            description={
+              <>
+                Share of the {projects.length} active {projects.length === 1 ? "project" : "projects"} each project
+                manager runs.
+                {withoutManager > 0 && ` ${withoutManager} ${withoutManager === 1 ? "project has" : "projects have"} no manager yet.`}
+              </>
+            }
+            rows={managerWorkload}
+            total={projects.length}
+          />
+        )}
+
+        {seoWorkload.length > 0 && (
+          <WorkloadCard
+            title="SEO workload"
+            description={`Share of the ${projects.length} active ${projects.length === 1 ? "project" : "projects"} each SEO specialist is assigned to. Projects can have several people, so the percentages don't add up to 100.`}
+            rows={seoWorkload}
+            total={projects.length}
+          />
+        )}
       </div>
     </div>
   );

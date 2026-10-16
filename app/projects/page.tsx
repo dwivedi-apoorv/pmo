@@ -13,6 +13,8 @@ import {
 } from "@/lib/payments";
 import type { EmployeeOption } from "@/components/employee-select";
 import { EditProjectDialog } from "@/components/edit-project-dialog";
+import { PageHeader } from "@/components/page-header";
+import { NewProjectButton } from "@/components/new-project-button";
 import { ColumnsMenu } from "@/components/columns-menu";
 import { SearchBox } from "@/components/search-box";
 import { SortHead } from "@/components/sort-head";
@@ -65,9 +67,9 @@ export default async function ProjectsPage({
   const error = projectsRes.error ?? peopleRes.error;
   if (error) {
     return (
-      <div className="w-full p-6">
-        <h1 className="text-2xl font-semibold">PMO Dashboard</h1>
-        <p className="mt-2 text-destructive">Could not load data: {error.message}</p>
+      <div className="w-full space-y-6 p-4 sm:p-6">
+        <PageHeader title="Projects" />
+        <p className="text-destructive">Could not load data: {error.message}</p>
       </div>
     );
   }
@@ -114,10 +116,11 @@ export default async function ProjectsPage({
 
   return (
     <div className="w-full space-y-6 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-        <p className="text-sm text-muted-foreground">Active projects, who runs them and when reports and payments are due</p>
-      </div>
+      <PageHeader
+        title="Projects"
+        description="Active projects, their teams, reports and payments"
+        action={<NewProjectButton employees={assignable} managers={managers} />}
+      />
 
       <Card>
         <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">

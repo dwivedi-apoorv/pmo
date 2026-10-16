@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowLeftIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { isProjectManager, loadPeople } from "@/lib/people";
 import { reactivateEmployee } from "@/app/actions";
 import { DeactivateEmployeeDialog } from "@/components/deactivate-employee-dialog";
 import { DeleteEmployeeDialog } from "@/components/delete-employee-dialog";
+import { PageHeader } from "@/components/page-header";
+import { NewEmployeeButton } from "@/components/new-employee-button";
 import { SearchBox } from "@/components/search-box";
 import { SortHead } from "@/components/sort-head";
 import { Badge } from "@/components/ui/badge";
@@ -46,7 +47,8 @@ export default async function PeoplePage({
   const error = peopleRes.error ?? projectsRes.error;
   if (error) {
     return (
-      <div className="w-full p-6">
+      <div className="w-full space-y-6 p-4 sm:p-6">
+        <PageHeader title="Employees" />
         <p className="text-destructive">Could not load data: {error.message}</p>
       </div>
     );
@@ -83,24 +85,18 @@ export default async function PeoplePage({
       })
     : sorted;
 
+  const roles = [...new Set(["Project Manager", ...roster.flatMap((e) => (e.role ? [e.role.trim()] : []))])].sort();
   const active = roster.filter((e) => e.is_active);
   const managerCandidates = active.filter(isProjectManager);
   const assigneeCandidates = active.filter((e) => !isProjectManager(e));
 
   return (
     <div className="w-full space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <Link
-            href="/"
-            className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeftIcon className="size-4" /> Dashboard
-          </Link>
-          <h1 className="text-2xl font-semibold tracking-tight">Employees</h1>
-          <p className="text-sm text-muted-foreground">Deactivate or remove people. Add new ones from the sidebar.</p>
-        </div>
-      </div>
+      <PageHeader
+        title="Employees"
+        description="Add, deactivate or remove people"
+        action={<NewEmployeeButton roles={roles} />}
+      />
 
       <Card>
         <CardHeader>
