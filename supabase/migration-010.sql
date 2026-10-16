@@ -3,3 +3,4 @@
 alter table payment_dues drop constraint if exists payment_dues_source_check;
 alter table payment_dues
   add constraint payment_dues_source_check check (source in ('cron', 'manual', 'migrated', 'backfill'));
+
