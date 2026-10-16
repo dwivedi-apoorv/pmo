@@ -1,0 +1,242 @@
+import Link from "next/link";
+import { cookies } from "next/headers";
+import { supabase } from "@/lib/supabase";
+import { COLUMNS, HIDDEN_COLUMNS_COOKIE, parseHidden, type ColumnId } from "@/lib/columns";
+import { loadPeople } from "@/lib/people";
+import { nextReportDate } from "@/lib/reporting";
+import {
+  formatUSD,
+  methodLabel,
+  nextPaymentDate,
+  termLabel,
+  type PaymentPlan,
+} from "@/lib/payments";
+import type { EmployeeOption } from "@/components/employee-select";
+import { EditProjectDialog } from "@/components/edit-project-dialog";
+import { ColumnsMenu } from "@/components/columns-menu";
+import { SearchBox } from "@/components/search-box";
+import { SortHead } from "@/components/sort-head";
+import { Badge } from "@/components/ui/badge";
+import { AssigneeBadges } from "@/components/assignee-badges";
+import { WebsiteLink } from "@/components/website-link";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
+export const dynamic = "force-dynamic"; // always show fresh data
+
+type Project = {
+  id: string;
+  name: string;
+  client_name: string;
+  website: string | null;
+  onboarding_date: string;
+  reporting_date: string;
+  project_manager_id: string | null;
+  project_assignments: { employees: EmployeeOption | null }[];
+} & PaymentPlan;
+
+type SortKey = "name" | "client" | "website" | "onboarded" | "reporting" | "payment" | "manager" | "assigned";
+const SORT_KEYS: SortKey[] = ["name", "client", "website", "onboarded", "reporting", "payment", "manager", "assigned"];
+
+export default async function ProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string; dir?: string; q?: string }>;
+}) {
+  const sp = await searchParams;
+  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "reporting";
+  const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc";
+  const q = (sp.q ?? "").trim();
+  const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
+  const show = (id: ColumnId) => !hidden.has(id);
+
+  const [projectsRes, peopleRes] = await Promise.all([
+    supabase
+      .from("projects")
+      .select(
+        "id, name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id, project_assignments(employees(id, name, role))"
+      )
+      .eq("status", "active")
+      .order("reporting_date", { ascending: true })
+      .returns<Project[]>(),
+    loadPeople(),
+  ]);
+
+  const error = projectsRes.error ?? peopleRes.error;
+  if (error) {
+    return (
+      <div className="w-full p-6">
+        <h1 className="text-2xl font-semibold">PMO Dashboard</h1>
+        <p className="mt-2 text-destructive">Could not load data: {error.message}</p>
+      </div>
+    );
+  }
+
+  const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
+  const keyOf = (p: Project): string | number =>
+    sort === "name" ? p.name
+    : sort === "client" ? p.client_name
+    : sort === "website" ? (p.website ?? "")
+    : sort === "onboarded" ? p.onboarding_date
+    : sort === "manager" ? (everyoneById.get(p.project_manager_id ?? "")?.name ?? "")
+    : sort === "assigned" ? p.project_assignments.length
+    : sort === "payment" ? (nextPaymentDate(p) ?? "9999-12-31") // no upcoming payment sorts last
+    : nextReportDate(p.reporting_date);
+  const projects = [...(projectsRes.data ?? [])].sort((a, b) => {
+    const ka = keyOf(a);
+    const kb = keyOf(b);
+    const cmp = typeof ka === "number" && typeof kb === "number" ? ka - kb : String(ka).localeCompare(String(kb));
+    return (dir === "asc" ? cmp : -cmp) || a.name.localeCompare(b.name);
+  });
+  const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const visible = terms.length
+    ? projects.filter((p) => {
+        const hay = [
+          p.name,
+          p.client_name,
+          p.website ?? "",
+          termLabel(p.payment_term),
+          methodLabel(p.payment_method),
+          everyoneById.get(p.project_manager_id ?? "")?.name ?? "",
+          ...p.project_assignments.map((a) => a.employees?.name ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return terms.every((t) => hay.includes(t));
+      })
+    : projects;
+  const { slugOf } = peopleRes;
+  const everyone = [...peopleRes.people].sort((a, b) => a.name.localeCompare(b.name));
+  const employees = everyone.filter((e) => e.is_active); // deactivated people are hidden from dropdowns
+  const isManager = (e: EmployeeOption) => e.role?.trim().toLowerCase() === "project manager";
+  const managers = employees.filter(isManager);
+  const assignable = employees.filter((e) => !isManager(e)); // project managers aren't assigned as team members
+
+  return (
+    <div className="w-full space-y-6 p-4 sm:p-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
+        <p className="text-sm text-muted-foreground">Active projects, who runs them and when reports and payments are due</p>
+      </div>
+
+      <Card>
+        <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>
+            Active projects
+            {q && <span className="ml-2 text-sm font-normal text-muted-foreground">{visible.length} of {projects.length}</span>}
+          </CardTitle>
+          <div className="flex items-center gap-2">
+            <SearchBox placeholder="Search project, client, manager…" />
+            <ColumnsMenu hidden={[...hidden]} />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="name">Project</SortHead>
+                {show("client") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="client">Client name</SortHead>}
+                {show("website") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="website">Website</SortHead>}
+                {show("onboarded") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="onboarded">Onboarded</SortHead>}
+                {show("reporting") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="reporting">Next report</SortHead>}
+                {show("payment") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="payment">Next payment</SortHead>}
+                {show("manager") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="manager">Project manager</SortHead>}
+                {show("assigned") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="assigned">Assigned to</SortHead>}
+                <TableHead className="text-right">Edit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((p) => {
+                const assigned = p.project_assignments.flatMap((a) =>
+                  a.employees ? [{ ...a.employees, slug: slugOf(a.employees.id) }] : []
+                );
+                const manager = everyone.find((e) => e.id === p.project_manager_id);
+                // Only project managers are offered as manager and only other staff as
+                // assignees, but whoever is already on the project stays selectable.
+                const managerOptions = manager && !isManager(manager) ? [...managers, manager] : managers;
+                const peopleOptions = [...assignable, ...assigned.filter((e) => !assignable.some((x) => x.id === e.id))];
+                return (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-medium">{p.name}</TableCell>
+                    {show("client") && (
+                      <TableCell>{p.client_name}</TableCell>
+                    )}
+                    {show("website") && (
+                      <TableCell><WebsiteLink url={p.website} /></TableCell>
+                    )}
+                    {show("onboarded") && (
+                      <TableCell>{p.onboarding_date}</TableCell>
+                    )}
+                    {show("reporting") && (
+                      <TableCell className="whitespace-nowrap">
+                        {nextReportDate(p.reporting_date)}
+                      </TableCell>
+                    )}
+                    {show("payment") && (
+                      <TableCell className="whitespace-nowrap">
+                        {(() => {
+                          const next = nextPaymentDate(p);
+                          if (!next) return <span className="text-muted-foreground">—</span>;
+                          return (
+                            <>
+                              {next}
+                              <div className="text-xs text-muted-foreground">
+                                {formatUSD(p.payment_amount_usd)} · {termLabel(p.payment_term)} · {methodLabel(p.payment_method)}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </TableCell>
+                    )}
+                    {show("manager") && (
+                      <TableCell>
+                        {manager ? (
+                          <Link href={`/projects/${manager.slug}`} className="underline-offset-4 hover:underline">
+                            {manager.name}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>)}
+                      </TableCell>
+                    )}
+                    {show("assigned") && (
+                      <TableCell>
+                        <AssigneeBadges people={assigned} />
+                      </TableCell>
+                    )}
+                    <TableCell className="text-right">
+                      <EditProjectDialog
+                        id={p.id}
+                        values={{
+                          name: p.name,
+                          client_name: p.client_name,
+                          website: p.website,
+                          onboarding_date: p.onboarding_date,
+                          reporting_date: p.reporting_date,
+                          payment_date: p.payment_date,
+                          payment_term: p.payment_term,
+                          payment_method: p.payment_method,
+                          payment_amount_usd: p.payment_amount_usd,
+                        }}
+                        managers={managerOptions}
+                        people={peopleOptions}
+                        managerId={p.project_manager_id}
+                        assigneeIds={assigned.map((e) => e.id)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {visible.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={2 + COLUMNS.length - hidden.size} className="text-center text-muted-foreground">
+                    {q ? `No projects match “${q}”.` : "No active projects yet."}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
