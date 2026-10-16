@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { isProjectManager, loadPeople } from "@/lib/people";
+import type { ProjectStatus } from "@/lib/status";
 import { reactivateEmployee } from "@/app/actions";
 import { DeactivateEmployeeDialog } from "@/components/deactivate-employee-dialog";
 import { DeleteEmployeeDialog } from "@/components/delete-employee-dialog";
@@ -18,7 +19,7 @@ export const dynamic = "force-dynamic";
 type ProjectRow = {
   id: string;
   name: string;
-  status: "active" | "on_hold" | "completed";
+  status: ProjectStatus;
   project_manager_id: string | null;
   project_assignments: { employee_id: string }[];
 };
@@ -58,7 +59,7 @@ export default async function PeoplePage({
   const roster = peopleRes.people;
   const openCounts = new Map(
     roster.map((e) => {
-      const open = projects.filter((p) => p.status !== "completed");
+      const open = projects.filter((p) => p.status !== "ended");
       const managing = open.filter((p) => p.project_manager_id === e.id).length;
       const assigned = open.filter((p) => p.project_assignments.some((a) => a.employee_id === e.id)).length;
       return [e.id, managing + assigned] as const;
@@ -128,7 +129,7 @@ export default async function PeoplePage({
               {people.map((e) => {
                 const managed = projects.filter((p) => p.project_manager_id === e.id);
                 const assigned = projects.filter((p) => p.project_assignments.some((a) => a.employee_id === e.id));
-                const open = (p: ProjectRow) => p.status !== "completed";
+                const open = (p: ProjectRow) => p.status !== "ended";
                 const managedOpen = managed.filter(open);
                 const assignedOpen = assigned.filter(open);
                 return (

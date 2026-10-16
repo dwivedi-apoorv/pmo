@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseIcon, FolderKanbanIcon, LayoutDashboardIcon, UsersIcon } from "lucide-react";
+import { BriefcaseIcon, FolderKanbanIcon, LayoutDashboardIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -20,6 +20,8 @@ import {
 const PAGES = [
   { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
   { title: "Projects", href: "/projects", icon: BriefcaseIcon },
+  { title: "Payments", href: "/payments", icon: WalletIcon },
+  { title: "Onboarding", href: "/onboarding", icon: UserRoundPlusIcon },
   { title: "Employees", href: "/people", icon: UsersIcon },
 ];
 

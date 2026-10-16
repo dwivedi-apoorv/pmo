@@ -45,7 +45,7 @@ export function DeleteEmployeeDialog({
           <DialogTitle>Delete {employee.name} permanently?</DialogTitle>
           <DialogDescription>
             This can&apos;t be undone. {employee.name} will be removed from {assignedCount}{" "}
-            {assignedCount === 1 ? "project" : "projects"} (including completed ones) and left blank as project manager on{" "}
+            {assignedCount === 1 ? "project" : "projects"} (including ended ones) and left blank as project manager on{" "}
             {managedCount} {managedCount === 1 ? "project" : "projects"}. Their page will stop working.
           </DialogDescription>
         </DialogHeader>

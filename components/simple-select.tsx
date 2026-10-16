@@ -8,15 +8,23 @@ export function SimpleSelect({
   defaultValue = null,
   placeholder,
   required = false,
+  onValueChange,
 }: {
   name: string;
   options: readonly { value: string; label: string }[];
   defaultValue?: string | null;
   placeholder: string;
   required?: boolean;
+  onValueChange?: (value: string | null) => void;
 }) {
   return (
-    <Select name={name} items={[...options]} defaultValue={defaultValue} required={required}>
+    <Select
+      name={name}
+      items={[...options]}
+      defaultValue={defaultValue}
+      required={required}
+      onValueChange={(v) => onValueChange?.(v as string | null)}
+    >
       <SelectTrigger className="w-full">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>

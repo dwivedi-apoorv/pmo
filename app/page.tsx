@@ -1,17 +1,14 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { loadPeople } from "@/lib/people";
-import { daysUntil, dueLabel, nextReportDate } from "@/lib/reporting";
-import {
-  formatUSD,
-  methodLabel,
-  nextPaymentDate,
-  paymentWindowDays,
-  termLabel,
-  type PaymentPlan,
-} from "@/lib/payments";
+import { daysUntil, dueLabel, nextReportDate, todayISO } from "@/lib/reporting";
+import { formatUSD, projectionMonths, type PaymentPlan } from "@/lib/payments";
+import { attentionRows, monthItems } from "@/lib/dues";
+import { loadPaymentsData } from "@/lib/payments-data";
 import type { EmployeeOption } from "@/components/employee-select";
+import { AttentionList } from "@/components/attention-list";
 import { PageHeader } from "@/components/page-header";
+import { RevenueSummary } from "@/components/revenue-summary";
 import { WorkloadCard, type WorkloadRow } from "@/components/workload-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,7 +27,8 @@ type Project = {
 } & PaymentPlan;
 
 export default async function Home() {
-  const [projectsRes, peopleRes] = await Promise.all([
+  const month = projectionMonths(todayISO(), 1)[0];
+  const [projectsRes, peopleRes, payments, onboardedRes] = await Promise.all([
     supabase
       .from("projects")
       .select(
@@ -40,9 +38,16 @@ export default async function Home() {
       .order("reporting_date", { ascending: true })
       .returns<Project[]>(),
     loadPeople(),
+    loadPaymentsData(),
+    // Projects onboarded this month, whatever their status now.
+    supabase
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .gte("onboarding_date", month.start)
+      .lte("onboarding_date", month.end),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? onboardedRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -61,14 +66,19 @@ export default async function Home() {
     .filter((x) => x.days <= DUE_SOON_DAYS)
     .sort((a, b) => a.days - b.days || a.p.name.localeCompare(b.p.name));
 
-  const paymentsDue = projects
-    .flatMap((p) => {
-      const next = nextPaymentDate(p);
-      if (!next) return [];
-      const days = daysUntil(next);
-      return days <= paymentWindowDays(p.payment_method) ? [{ p, next, days }] : [];
-    })
-    .sort((a, b) => a.days - b.days || a.p.name.localeCompare(b.p.name));
+  // Payments: the short version. The full list, history and "Mark as paid" live on the Payments page.
+  const { active, ledger, info, labelOf } = payments;
+  const attention = attentionRows(active, ledger);
+  const overdueRows = attention.filter((r) => r.days < 0);
+  const overdueTotal = overdueRows.reduce((sum, r) => sum + r.amount, 0);
+  const SHOWN = 3;
+  const managerName = (id: string | null | undefined) => (id ? everyoneById.get(id)?.name : undefined);
+
+  // Revenue for the current month only: real amounts from the ledger, plus scheduled payments of active
+  // projects the ledger hasn't opened yet.
+  const monthRows = monthItems(month, active, ledger, labelOf);
+  const monthExpected = monthRows.reduce((sum, it) => sum + it.amount, 0);
+  const monthReceived = monthRows.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
 
   const pctOf = (count: number) => (projects.length ? Math.round((count / projects.length) * 100) : 0);
   const byWorkload = (a: WorkloadRow, b: WorkloadRow) => b.count - a.count || a.name.localeCompare(b.name);
@@ -110,6 +120,9 @@ export default async function Home() {
               </Link>
             </CardDescription>
             <CardTitle className="text-3xl">{projects.length}</CardTitle>
+            <Link href="/onboarding" className="text-xs text-muted-foreground underline-offset-4 hover:underline">
+              {onboardedRes.count ?? 0} onboarded in {month.label}
+            </Link>
           </CardHeader>
         </Card>
         {managers.map((m) => (
@@ -168,43 +181,44 @@ export default async function Home() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Payments due soon
-              <span className="ml-2 text-sm font-normal text-muted-foreground">{paymentsDue.length}</span>
+              Payments
+              <span className="ml-2 text-sm font-normal text-muted-foreground">{attention.length}</span>
+              {overdueRows.length > 0 && (
+                <Badge variant="destructive" className="ml-2 align-middle">
+                  {overdueRows.length} overdue · {formatUSD(overdueTotal)}
+                </Badge>
+              )}
             </CardTitle>
-            <CardDescription>
-              Stripe link and bank wire payments show 7 days ahead; subscriptions (auto-charged) show 3 days ahead.
-            </CardDescription>
+            <CardDescription>Overdue first, then coming up.</CardDescription>
           </CardHeader>
-          <CardContent>
-            {paymentsDue.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payments coming up.</p>
+          <CardContent className="space-y-3">
+            {attention.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nothing is overdue or coming up.</p>
             ) : (
-              <ul className="divide-y">
-                {paymentsDue.map(({ p, next, days }) => {
-                  const mgr = everyoneById.get(p.project_manager_id ?? "");
-                  const auto = p.payment_method === "subscription";
-                  return (
-                    <li key={p.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5 first:pt-0 last:pb-0">
-                      <Badge variant={days === 0 ? "destructive" : "default"} className="w-24 justify-center">
-                        {dueLabel(days)}
-                      </Badge>
-                      <span className="font-medium">{p.name}</span>
-                      <span className="text-sm text-muted-foreground">{p.client_name}</span>
-                      <span className="text-sm text-muted-foreground">{next}</span>
-                      <span className="text-sm font-medium">{formatUSD(p.payment_amount_usd)}</span>
-                      <Badge variant="secondary">{termLabel(p.payment_term)}</Badge>
-                      <Badge variant="outline">{auto ? "Auto-charge" : methodLabel(p.payment_method)}</Badge>
-                      <span className="basis-full text-sm text-muted-foreground">
-                        {mgr ? `PM: ${mgr.name}` : "No project manager"}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
+              <AttentionList rows={attention.slice(0, SHOWN)} info={info} managerName={managerName} compact />
             )}
+            <Link href="/payments" className="inline-block text-sm font-medium underline-offset-4 hover:underline">
+              {attention.length > SHOWN ? `View all ${attention.length} payments →` : "Open payments →"}
+            </Link>
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Revenue this month
+            <span className="ml-2 text-sm font-normal text-muted-foreground">{month.label}</span>
+          </CardTitle>
+          <CardDescription>From the payment ledger (USD).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <RevenueSummary monthLabel={month.label} expected={monthExpected} received={monthReceived} overdue={overdueTotal} />
+          <Link href="/payments" className="inline-block text-sm font-medium underline-offset-4 hover:underline">
+            See every payment and past months →
+          </Link>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
         {managerWorkload.length > 0 && (

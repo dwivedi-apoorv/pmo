@@ -41,3 +41,26 @@ export const daysUntil = (iso: string, today = todayISO()) =>
 
 export const dueLabel = (days: number) =>
   days === 0 ? "Today" : days === 1 ? "Tomorrow" : `In ${days} days`;
+
+export const addDays = (iso: string, days: number) => toISO(toUTC(iso) + days * 86_400_000);
+
+/** The last date in the series that is on or before `date`, or null if the series hasn't started yet. */
+export function lastOccurrenceOnOrBefore(anchor: string, stepMonths: number, date: string): string | null {
+  const limit = toUTC(date);
+  if (toUTC(anchor) > limit) return null;
+
+  const day = Number(anchor.slice(8, 10));
+  const ay = Number(anchor.slice(0, 4));
+  const am = Number(anchor.slice(5, 7)) - 1;
+  const monthsApart = (Number(date.slice(0, 4)) - ay) * 12 + (Number(date.slice(5, 7)) - 1 - am);
+
+  for (let k = Math.floor(monthsApart / stepMonths), i = 0; i < 3 && k >= 0; k--, i++) {
+    const idx = am + k * stepMonths;
+    const y = ay + Math.floor(idx / 12);
+    const m = ((idx % 12) + 12) % 12;
+    const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const candidate = Date.UTC(y, m, Math.min(day, daysInMonth));
+    if (candidate <= limit) return toISO(candidate);
+  }
+  return anchor;
+}

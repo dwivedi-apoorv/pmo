@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/simple-select";
-import { PAYMENT_METHODS, PAYMENT_TERMS, type PaymentPlan } from "@/lib/payments";
+import { Checkbox } from "@/components/ui/checkbox";
+import { backfillDates, hasEarlierMonths, lastMonthEnd } from "@/lib/backfill";
+import { PAYMENT_METHODS, PAYMENT_TERMS, formatUSD, type PaymentPlan, type PaymentTerm } from "@/lib/payments";
 import { todayISO } from "@/lib/reporting";
 
 export type ProjectValues = {
@@ -25,6 +27,15 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
   const [onboarding, setOnboarding] = useState(values?.onboarding_date ?? today);
   const [payment, setPayment] = useState(isNew ? today : (values.payment_date ?? ""));
   const [paymentEdited, setPaymentEdited] = useState(false);
+  const [term, setTerm] = useState<PaymentTerm | null>(values?.payment_term ?? null);
+  const [amount, setAmount] = useState(values?.payment_amount_usd?.toString() ?? "");
+  const [backfill, setBackfill] = useState(false);
+  const [until, setUntil] = useState(lastMonthEnd(today));
+
+  // "Earlier payments were already collected" only makes sense when the first payment is before this month.
+  const earlier = hasEarlierMonths(payment, today);
+  const dates = backfill && earlier ? backfillDates({ payment_date: payment, payment_term: term }, until, today) : [];
+  const total = dates.length * (Number(amount) || 0);
 
   return (
     <>
@@ -110,6 +121,7 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
                 inputMode="decimal"
                 className="pl-6"
                 defaultValue={values?.payment_amount_usd ?? ""}
+                onChange={(e) => setAmount(e.target.value)}
                 required
               />
             </div>
@@ -121,6 +133,7 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
               options={PAYMENT_TERMS}
               defaultValue={values?.payment_term ?? null}
               placeholder="Select term"
+              onValueChange={(v) => setTerm(v as PaymentTerm | null)}
               required
             />
           </div>
@@ -139,6 +152,47 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
           Monthly, quarterly and biannual payments repeat on the same day as the first payment date. One-off is
           paid once on that date.
         </p>
+
+        {earlier && (
+          <div className="grid gap-3 rounded-md border p-3">
+            <Label className="items-start gap-2.5 font-normal">
+              <Checkbox checked={backfill} onCheckedChange={(c) => setBackfill(c === true)} className="mt-0.5" />
+              <span>
+                <span className="font-medium">Earlier payments were already collected</span>
+                <span className="block text-xs text-muted-foreground">
+                  Records the past payments as paid, so revenue history is complete and nothing shows as overdue.
+                </span>
+              </span>
+            </Label>
+            {backfill && (
+              <>
+                <input type="hidden" name="backfill" value="1" />
+                <div className="grid gap-1.5 sm:max-w-xs">
+                  <Label htmlFor="backfill_until">Collected up to (and including)</Label>
+                  <Input
+                    id="backfill_until"
+                    name="backfill_until"
+                    type="date"
+                    value={until}
+                    min={payment}
+                    max={today}
+                    onChange={(e) => setUntil(e.target.value)}
+                    required
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground" role="status">
+                  {!term || !Number(amount)
+                    ? "Choose the term and amount above to see what will be recorded."
+                    : dates.length === 0
+                      ? "No payments fall in that range."
+                      : `Will record ${dates.length} ${dates.length === 1 ? "payment" : "payments"} as paid (${dates[0]}${
+                          dates.length > 1 ? ` to ${dates[dates.length - 1]}` : ""
+                        }), ${formatUSD(total)} in total.`}
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </>
   );

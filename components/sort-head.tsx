@@ -12,6 +12,7 @@ export function SortHead({
   sort,
   dir,
   q,
+  extra,
   children,
 }: {
   basePath: string;
@@ -19,6 +20,7 @@ export function SortHead({
   sort: string;
   dir: SortDir;
   q?: string;
+  extra?: Record<string, string>; // other URL params to keep, e.g. the status tab
   children: React.ReactNode;
 }) {
   const current = sort === k;
@@ -26,7 +28,7 @@ export function SortHead({
   const Icon = !current ? ArrowUpDownIcon : dir === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (
     <TableHead aria-sort={current ? (dir === "asc" ? "ascending" : "descending") : "none"}>
-      <Link href={`${basePath}?${new URLSearchParams({ ...(q ? { q } : {}), sort: k, dir: nextDir })}`} className="inline-flex items-center gap-1 hover:text-foreground">
+      <Link href={`${basePath}?${new URLSearchParams({ ...extra, ...(q ? { q } : {}), sort: k, dir: nextDir })}`} className="inline-flex items-center gap-1 hover:text-foreground">
         {children}
         <Icon className={current ? "size-3.5" : "size-3.5 opacity-40"} />
       </Link>

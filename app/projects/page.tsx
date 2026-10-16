@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { supabase } from "@/lib/supabase";
 import { COLUMNS, HIDDEN_COLUMNS_COOKIE, parseHidden, type ColumnId } from "@/lib/columns";
 import { loadPeople } from "@/lib/people";
+import { overdueSince, type Due } from "@/lib/dues";
 import { nextReportDate } from "@/lib/reporting";
 import {
   formatUSD,
@@ -11,8 +12,10 @@ import {
   termLabel,
   type PaymentPlan,
 } from "@/lib/payments";
+import { PROJECT_STATUSES, STATUS_LABEL, isProjectStatus, type ProjectStatus } from "@/lib/status";
 import type { EmployeeOption } from "@/components/employee-select";
 import { EditProjectDialog } from "@/components/edit-project-dialog";
+import { ProjectStatusMenu } from "@/components/project-status-menu";
 import { PageHeader } from "@/components/page-header";
 import { NewProjectButton } from "@/components/new-project-button";
 import { ColumnsMenu } from "@/components/columns-menu";
@@ -33,9 +36,14 @@ type Project = {
   website: string | null;
   onboarding_date: string;
   reporting_date: string;
+  status: ProjectStatus;
   project_manager_id: string | null;
   project_assignments: { employees: EmployeeOption | null }[];
 } & PaymentPlan;
+
+type StatusLogRow = { project_id: string; status: ProjectStatus; reason: string | null; changed_at: string };
+
+type Tab = ProjectStatus | "all";
 
 type SortKey = "name" | "client" | "website" | "onboarded" | "reporting" | "payment" | "manager" | "assigned";
 const SORT_KEYS: SortKey[] = ["name", "client", "website", "onboarded", "reporting", "payment", "manager", "assigned"];
@@ -43,28 +51,37 @@ const SORT_KEYS: SortKey[] = ["name", "client", "website", "onboarded", "reporti
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string; dir?: string; q?: string }>;
+  searchParams: Promise<{ sort?: string; dir?: string; q?: string; status?: string }>;
 }) {
   const sp = await searchParams;
   const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "reporting";
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc";
   const q = (sp.q ?? "").trim();
+  const tab: Tab = sp.status === "all" ? "all" : sp.status && isProjectStatus(sp.status) ? sp.status : "active";
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
 
-  const [projectsRes, peopleRes] = await Promise.all([
+  const [projectsRes, peopleRes, ledgerRes, statusRes] = await Promise.all([
     supabase
       .from("projects")
       .select(
-        "id, name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id, project_assignments(employees(id, name, role))"
+        "id, name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, status, project_manager_id, project_assignments(employees(id, name, role))"
       )
-      .eq("status", "active")
       .order("reporting_date", { ascending: true })
       .returns<Project[]>(),
     loadPeople(),
+    supabase
+      .from("payment_dues")
+      .select("project_id, due_date, amount_usd, term, method, status, paid_at")
+      .returns<Due[]>(),
+    supabase
+      .from("project_status_log")
+      .select("project_id, status, reason, changed_at")
+      .order("changed_at", { ascending: false })
+      .returns<StatusLogRow[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? statusRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -74,6 +91,7 @@ export default async function ProjectsPage({
     );
   }
 
+  const ledger = ledgerRes.data ?? [];
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
   const keyOf = (p: Project): string | number =>
     sort === "name" ? p.name
@@ -84,12 +102,21 @@ export default async function ProjectsPage({
     : sort === "assigned" ? p.project_assignments.length
     : sort === "payment" ? (nextPaymentDate(p) ?? "9999-12-31") // no upcoming payment sorts last
     : nextReportDate(p.reporting_date);
-  const projects = [...(projectsRes.data ?? [])].sort((a, b) => {
+  const allProjects = projectsRes.data ?? [];
+  const counts: Record<Tab, number> = { all: allProjects.length, active: 0, halted: 0, ended: 0 };
+  for (const p of allProjects) counts[p.status]++;
+  // The newest log entry per project says why it is in its current status.
+  const lastChange = new Map<string, StatusLogRow>();
+  for (const r of statusRes.data ?? []) if (!lastChange.has(r.project_id)) lastChange.set(r.project_id, r);
+
+  const projects = allProjects.filter((p) => tab === "all" || p.status === tab).sort((a, b) => {
     const ka = keyOf(a);
     const kb = keyOf(b);
     const cmp = typeof ka === "number" && typeof kb === "number" ? ka - kb : String(ka).localeCompare(String(kb));
     return (dir === "asc" ? cmp : -cmp) || a.name.localeCompare(b.name);
   });
+  const extra = tab === "active" ? undefined : { status: tab };
+  const showStatus = tab !== "active";
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
   const visible = terms.length
     ? projects.filter((p) => {
@@ -101,6 +128,8 @@ export default async function ProjectsPage({
           methodLabel(p.payment_method),
           everyoneById.get(p.project_manager_id ?? "")?.name ?? "",
           ...p.project_assignments.map((a) => a.employees?.name ?? ""),
+          STATUS_LABEL[p.status],
+          lastChange.get(p.id)?.reason ?? "",
         ]
           .join(" ")
           .toLowerCase();
@@ -118,14 +147,30 @@ export default async function ProjectsPage({
     <div className="w-full space-y-6 p-4 sm:p-6">
       <PageHeader
         title="Projects"
-        description="Active projects, their teams, reports and payments"
+        description="Projects, their teams, reports and payments"
         action={<NewProjectButton employees={assignable} managers={managers} />}
       />
+
+      <div className="inline-flex w-fit rounded-lg bg-muted p-1 text-sm" role="tablist" aria-label="Project status">
+        {(["active", "halted", "ended", "all"] as const).map((t) => (
+          <Link
+            key={t}
+            href={`/projects?${new URLSearchParams({ ...(t === "active" ? {} : { status: t }), ...(q ? { q } : {}) })}`}
+            role="tab"
+            aria-selected={tab === t}
+            className={`rounded-md px-3 py-1 transition-colors ${
+              tab === t ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t === "all" ? "All" : STATUS_LABEL[t]} <span className="text-muted-foreground tabular-nums">{counts[t]}</span>
+          </Link>
+        ))}
+      </div>
 
       <Card>
         <CardHeader className="gap-3 sm:flex sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>
-            Active projects
+            {tab === "all" ? "All projects" : `${STATUS_LABEL[tab]} projects`}
             {q && <span className="ml-2 text-sm font-normal text-muted-foreground">{visible.length} of {projects.length}</span>}
           </CardTitle>
           <div className="flex items-center gap-2">
@@ -137,15 +182,16 @@ export default async function ProjectsPage({
           <Table>
             <TableHeader>
               <TableRow>
-                <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="name">Project</SortHead>
-                {show("client") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="client">Client name</SortHead>}
-                {show("website") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="website">Website</SortHead>}
-                {show("onboarded") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="onboarded">Onboarded</SortHead>}
-                {show("reporting") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="reporting">Next report</SortHead>}
-                {show("payment") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="payment">Next payment</SortHead>}
-                {show("manager") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="manager">Project manager</SortHead>}
-                {show("assigned") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} k="assigned">Assigned to</SortHead>}
-                <TableHead className="text-right">Edit</TableHead>
+                <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="name">Project</SortHead>
+                {showStatus && <TableHead>Status</TableHead>}
+                {show("client") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="client">Client name</SortHead>}
+                {show("website") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="website">Website</SortHead>}
+                {show("onboarded") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="onboarded">Onboarded</SortHead>}
+                {show("reporting") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="reporting">Next report</SortHead>}
+                {show("payment") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="payment">Next payment</SortHead>}
+                {show("manager") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="manager">Project manager</SortHead>}
+                {show("assigned") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="assigned">Assigned to</SortHead>}
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -161,6 +207,24 @@ export default async function ProjectsPage({
                 return (
                   <TableRow key={p.id}>
                     <TableCell className="font-medium">{p.name}</TableCell>
+                    {showStatus && (
+                      <TableCell className="min-w-44 max-w-64 whitespace-normal">
+                        {(() => {
+                          const change = lastChange.get(p.id);
+                          return (
+                            <>
+                              <Badge variant={p.status === "active" ? "default" : "secondary"}>{STATUS_LABEL[p.status]}</Badge>
+                              {change && (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  since {new Date(change.changed_at).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" })}
+                                  {change.reason && <> · <span className="text-foreground">{change.reason}</span></>}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
+                      </TableCell>
+                    )}
                     {show("client") && (
                       <TableCell>{p.client_name}</TableCell>
                     )}
@@ -172,20 +236,27 @@ export default async function ProjectsPage({
                     )}
                     {show("reporting") && (
                       <TableCell className="whitespace-nowrap">
-                        {nextReportDate(p.reporting_date)}
+                        {p.status === "active" ? nextReportDate(p.reporting_date) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                     )}
                     {show("payment") && (
                       <TableCell className="whitespace-nowrap">
                         {(() => {
-                          const next = nextPaymentDate(p);
-                          if (!next) return <span className="text-muted-foreground">—</span>;
+                          // Upcoming payments only matter while a project is active, but money still
+                          // owed stays visible (in red) even after it is halted or ended.
+                          const active = p.status === "active";
+                          const next = active ? nextPaymentDate(p) : null;
+                          const overdue = overdueSince({ ...p, active }, ledger);
+                          if (!next && !overdue) return <span className="text-muted-foreground">—</span>;
                           return (
                             <>
-                              {next}
+                              {next ?? <span className="text-muted-foreground">—</span>}
                               <div className="text-xs text-muted-foreground">
                                 {formatUSD(p.payment_amount_usd)} · {termLabel(p.payment_term)} · {methodLabel(p.payment_method)}
                               </div>
+                              {overdue && (
+                                <div className="text-xs font-medium text-destructive">Overdue since {overdue}</div>
+                              )}
                             </>
                           );
                         })()}
@@ -207,6 +278,7 @@ export default async function ProjectsPage({
                       </TableCell>
                     )}
                     <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-1">
                       <EditProjectDialog
                         id={p.id}
                         values={{
@@ -225,14 +297,16 @@ export default async function ProjectsPage({
                         managerId={p.project_manager_id}
                         assigneeIds={assigned.map((e) => e.id)}
                       />
+                      <ProjectStatusMenu id={p.id} name={p.name} status={p.status} />
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
               })}
               {visible.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={2 + COLUMNS.length - hidden.size} className="text-center text-muted-foreground">
-                    {q ? `No projects match “${q}”.` : "No active projects yet."}
+                  <TableCell colSpan={2 + COLUMNS.length - hidden.size + (showStatus ? 1 : 0)} className="text-center text-muted-foreground">
+                    {q ? `No projects match “${q}”.` : tab === "all" ? "No projects yet." : `No ${STATUS_LABEL[tab].toLowerCase()} projects.`}
                   </TableCell>
                 </TableRow>
               )}

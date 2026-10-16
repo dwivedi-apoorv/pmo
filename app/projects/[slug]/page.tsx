@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { loadPeople } from "@/lib/people";
 import { nextReportDate } from "@/lib/reporting";
+import { STATUS_LABEL, STATUS_ORDER, type ProjectStatus } from "@/lib/status";
 import { AssigneeBadges } from "@/components/assignee-badges";
 import { WebsiteLink } from "@/components/website-link";
 import { Badge } from "@/components/ui/badge";
@@ -20,13 +21,11 @@ type Project = {
   website: string | null;
   onboarding_date: string;
   reporting_date: string;
-  status: "active" | "on_hold" | "completed";
+  status: ProjectStatus;
   manager: Person | null;
   project_assignments: { employees: Person | null }[];
 };
 
-const STATUS_LABEL = { active: "Active", on_hold: "On hold", completed: "Completed" } as const;
-const STATUS_ORDER = { active: 0, on_hold: 1, completed: 2 } as const;
 
 export default async function TeamMemberPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
@@ -96,7 +95,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ slu
       <Card>
         <CardHeader>
           <CardTitle>Projects</CardTitle>
-          <CardDescription>Projects {person.name} manages or is assigned to, including completed ones</CardDescription>
+          <CardDescription>Projects {person.name} manages or is assigned to, including halted and ended ones</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -120,7 +119,7 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ slu
                   <TableCell>{p.client_name}</TableCell>
                   <TableCell><WebsiteLink url={p.website} /></TableCell>
                   <TableCell>{p.onboarding_date}</TableCell>
-                  <TableCell>{p.status === "completed" ? "—" : nextReportDate(p.reporting_date)}</TableCell>
+                  <TableCell>{p.status !== "active" ? "—" : nextReportDate(p.reporting_date)}</TableCell>
                   <TableCell>
                     <Badge variant={p.status === "active" ? "default" : "secondary"}>
                       {STATUS_LABEL[p.status]}
