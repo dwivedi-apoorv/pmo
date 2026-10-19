@@ -7,8 +7,16 @@ import { disconnectMicrosoft, installBotForEveryone, sendTestMessage } from "./a
 export function TestMessageButton() {
   const [pending, start] = useTransition();
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [email, setEmail] = useState("");
   return (
     <div className="grid gap-2">
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Send to (email) — leave empty to send to yourself"
+        className="h-9 w-full max-w-md rounded-md border bg-background px-3 text-sm"
+      />
       <div>
         <Button
           type="button"
@@ -18,7 +26,7 @@ export function TestMessageButton() {
             start(async () => {
               setResult(null);
               try {
-                const r = await sendTestMessage();
+                const r = await sendTestMessage(email);
                 setResult({ ok: r.ok, text: r.ok ? `Sent via ${r.method === "bot" ? "the bot" : "the connected account"}. Check Teams.` : (r.detail ?? "Failed.") });
               } catch (e) {
                 setResult({ ok: false, text: e instanceof Error ? e.message : "Failed." });
@@ -26,7 +34,7 @@ export function TestMessageButton() {
             })
           }
         >
-          {pending ? "Sending…" : "Send a test message to me"}
+          {pending ? "Sending…" : email.trim() ? "Send a test message" : "Send a test message to me"}
         </Button>
       </div>
       {result && (

@@ -42,11 +42,18 @@ export async function installBotForEveryone(): Promise<{ name: string; ok: boole
 }
 
 /** Sends a test message to the admin who clicked, using the method that is switched on. */
-export async function sendTestMessage(): Promise<Delivery & { method?: "user" | "bot" }> {
+export async function sendTestMessage(toEmail?: string): Promise<Delivery & { method?: "user" | "bot" }> {
   const me = await requireAdmin();
+  let to = { id: me.id, name: me.name, email: me.email };
+  const wanted = (toEmail ?? "").trim();
+  if (wanted && wanted.toLowerCase() !== me.email.toLowerCase()) {
+    const { data } = await supabaseAdmin.from("employees").select("id, name, email").ilike("email", wanted).maybeSingle();
+    if (!data?.email) return { ok: false, detail: `${wanted} isn't an employee in the PMO yet. Add them under People first.` };
+    to = { id: data.id, name: data.name, email: data.email };
+  }
   const sender = await Sender.open();
   const result = await sender.send(
-    { id: me.id, name: me.name, email: me.email },
+    to,
     { title: "Test message from the PMO", sections: [{ heading: "It works", lines: ["If you can read this, Teams notifications are set up for you."] }] },
     "test"
   );
