@@ -6,6 +6,7 @@ import type { Due } from "@/lib/dues";
 import type { ReportSend } from "@/lib/reports";
 import { buildDigests, type DigestEmployee, type DigestProject } from "@/lib/notify/digest";
 import type { Notice } from "@/lib/notify/notice";
+import { assignedNotice, type AssignedProject } from "@/lib/notify/project";
 import { Sender, getDisabledKinds, type Recipient } from "@/lib/notify/send";
 
 export type DigestRun = { method: string; people: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
@@ -75,31 +76,42 @@ export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<Di
   return run;
 }
 
-/** "You've been added to X": sent right after a manager or team change. Never throws (a Teams problem must not break saving). */
+/** "You've been added to X": sent to everyone newly added as manager or team member (including whoever made the change). Never throws (a Teams problem must not break saving). */
 export async function notifyAssigned(
   projectId: string,
-  added: { employeeId: string; role: "Project manager" | "Team member" }[],
-  actorId: string
+  added: { employeeId: string; role: "Project manager" | "Team member" }[]
 ) {
   try {
     if ((await getDisabledKinds()).has("assigned")) return;
-    const who = added.filter((a) => a.employeeId !== actorId); // don't tell people about their own change
+    const who = added;
     if (!who.length) return;
-    const [{ data: project }, { data: people }] = await Promise.all([
-      supabaseAdmin.from("projects").select("name, client_name").eq("id", projectId).maybeSingle(),
+    const [{ data: project }, { data: people }, { data: team }, { data: svc }] = await Promise.all([
+      supabaseAdmin
+        .from("projects")
+        .select("name, client_name, website, status, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id")
+        .eq("id", projectId)
+        .maybeSingle(),
       supabaseAdmin.from("employees").select("id, name, email, is_active").in("id", who.map((w) => w.employeeId)),
+      supabaseAdmin.from("project_assignments").select("employees(name)").eq("project_id", projectId),
+      supabaseAdmin.from("project_services").select("services(name)").eq("project_id", projectId),
     ]);
     if (!project) return;
+    const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
+    const managerName = project.project_manager_id
+      ? (await supabaseAdmin.from("employees").select("name").eq("id", project.project_manager_id).maybeSingle()).data?.name ?? null
+      : null;
+    const details: AssignedProject = {
+      ...(project as any),
+      manager: managerName,
+      team: (team ?? []).map((t: any) => one<{ name: string }>(t.employees)?.name).filter((n): n is string => !!n).sort(),
+      services: (svc ?? []).map((t: any) => one<{ name: string }>(t.services)?.name).filter((n): n is string => !!n).sort(),
+    };
     const sender = await Sender.open();
     if (sender.method === "off") return;
     for (const w of who) {
       const e = people?.find((p) => p.id === w.employeeId);
       if (!e?.is_active || !e.email) continue;
-      const notice: Notice = {
-        title: `You've been added to ${project.name}`,
-        sections: [{ heading: "Details", lines: [`Your role: ${w.role}`, `Client: ${project.client_name}`] }],
-        link: { label: "Open the PMO", url: `${appUrl()}/projects` },
-      };
+      const notice: Notice = assignedNotice(details, w.role, appUrl());
       await sender.send({ id: e.id, name: e.name, email: e.email } as Recipient, notice, "assigned");
     }
   } catch (e) {
