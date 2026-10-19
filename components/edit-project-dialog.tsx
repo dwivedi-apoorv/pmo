@@ -14,6 +14,10 @@ import {
 import type { EmployeeOption } from "@/components/employee-select";
 import { ProjectPeopleFields } from "@/components/project-people-fields";
 import { ProjectHistory } from "@/components/project-history";
+import { ProjectNotes } from "@/components/project-notes";
+import type { NoteVersion, ProjectNote } from "@/lib/notes";
+import { ServicePicker } from "@/components/service-picker";
+import type { Service } from "@/lib/services";
 import type { TeamPeriod } from "@/lib/history";
 import { ProjectFields, type ProjectValues } from "@/components/project-fields";
 import { updateProject } from "@/app/actions";
@@ -26,6 +30,10 @@ export function EditProjectDialog({
   managerId,
   assigneeIds,
   history,
+  services,
+  serviceIds,
+  notes,
+  noteVersions,
 }: {
   id: string;
   values: ProjectValues;
@@ -34,8 +42,12 @@ export function EditProjectDialog({
   managerId: string | null;
   assigneeIds: string[];
   history: TeamPeriod[];
+  services: Service[];
+  serviceIds: string[];
+  notes: ProjectNote[];
+  noteVersions: NoteVersion[];
 }) {
-  const [tab, setTab] = useState<"details" | "history">("details");
+  const [tab, setTab] = useState<"details" | "history" | "notes">("details");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -72,6 +84,7 @@ export function EditProjectDialog({
             [
               ["details", "Details"],
               ["history", `History (${history.length})`],
+              ["notes", `Notes (${notes.length})`],
             ] as const
           ).map(([key, label]) => (
             <button
@@ -96,6 +109,7 @@ export function EditProjectDialog({
           <form action={onSubmit} className="grid gap-4">
             <input type="hidden" name="project_id" value={id} />
             <ProjectFields values={values} />
+            <ServicePicker services={services} defaultSelected={serviceIds} />
             <ProjectPeopleFields
               managers={managers}
               people={people}
@@ -108,6 +122,9 @@ export function EditProjectDialog({
               {pending ? "Saving…" : "Save changes"}
             </Button>
           </form>
+        </div>
+        <div role="tabpanel" id={`panel-notes-${id}`} aria-labelledby={`tab-notes-${id}`} hidden={tab !== "notes"}>
+          <ProjectNotes projectId={id} notes={notes} versions={noteVersions} />
         </div>
         <div role="tabpanel" id={`panel-history-${id}`} aria-labelledby={`tab-history-${id}`} hidden={tab !== "history"}>
           <ProjectHistory history={history} />

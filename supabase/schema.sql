@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 012) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 019) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -63,26 +63,242 @@ create table project_status_log (
 
 create index project_status_log_project_idx on project_status_log (project_id, changed_at desc);
 
--- Same rule as the other tables: the public key can only read, writes go through the server.
+-- Locked down: row-level security is on with no policies, so only the server can use this table.
 alter table project_status_log enable row level security;
-create policy "public read project_status_log" on project_status_log for select using (true);
 
 create index on project_assignments (employee_id);
 create index on projects (status);
 create index on projects (project_manager_id);
 create index on payment_dues (status, due_date);
 
--- The public anon key can only READ. All writes go through the app's server
--- actions, which use the service-role key (never exposed to the browser).
+-- Locked down: row-level security is on and there are NO policies, so the public (anon) key can
+-- neither read nor write anything. The app talks to the database only from the server, with the
+-- service-role key, after checking that you are logged in.
 alter table employees           enable row level security;
 alter table projects            enable row level security;
 alter table project_assignments enable row level security;
 alter table payment_dues        enable row level security;
 
-create policy "public read employees"   on employees           for select using (true);
-create policy "public read projects"    on projects            for select using (true);
-create policy "public read assignments" on project_assignments for select using (true);
-create policy "public read payment_dues" on payment_dues        for select using (true);
+
+-- Services: tag each project with the services it includes (SEO, Ads, Shopify, ...). A project can have
+-- several. Services live in their own table, linked to projects through a pivot table, like employees
+-- and assignments, so new services can be added at any time without changing the database.
+
+create table services (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null check (char_length(btrim(name)) between 1 and 40),
+  created_at timestamptz not null default now()
+);
+-- "seo" and "SEO" are the same service
+create unique index services_name_key on services (lower(btrim(name)));
+
+create table project_services (
+  project_id uuid not null references projects(id) on delete cascade,
+  service_id uuid not null references services(id) on delete restrict,   -- a service in use can't be removed
+  primary key (project_id, service_id)
+);
+create index project_services_service_idx on project_services (service_id);
+
+alter table services         enable row level security;
+alter table project_services enable row level security;
+
+-- The starting services. Add others from the project form whenever you need them.
+insert into services (name) values ('SEO'), ('Performance Marketing'), ('UI UX'), ('Redesign')
+on conflict do nothing;
+
+-- Returns the id of the service with this name, creating it if it doesn't exist yet. Extra spaces and
+-- capital letters don't create duplicates.
+create or replace function add_service(p_name text) returns uuid
+language plpgsql
+as $$
+declare
+  v_name text := regexp_replace(btrim(coalesce(p_name, '')), '\s+', ' ', 'g');
+  v_id   uuid;
+begin
+  if v_name = '' then
+    raise exception 'Service name is required.';
+  end if;
+  if char_length(v_name) > 40 then
+    raise exception 'Service name is too long (40 characters at most).';
+  end if;
+
+  select id into v_id from services where lower(btrim(name)) = lower(v_name);
+  if v_id is null then
+    insert into services (name) values (v_name) returning id into v_id;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Sets exactly which services a project has, in ONE transaction: removes the ones left out, adds new ones.
+create or replace function set_project_services(p_project uuid, p_services uuid[]) returns void
+language plpgsql
+as $$
+declare
+  wanted uuid[] := coalesce(p_services, '{}');
+begin
+  if not exists (select 1 from projects where id = p_project) then
+    raise exception 'Project not found.';
+  end if;
+
+  delete from project_services where project_id = p_project and not (service_id = any (wanted));
+
+  insert into project_services (project_id, service_id)
+  select p_project, s from unnest(wanted) as s
+  on conflict do nothing;
+end;
+$$;
+
+revoke execute on function add_service(text)                 from public, anon, authenticated;
+revoke execute on function set_project_services(uuid, uuid[]) from public, anon, authenticated;
+grant  execute on function add_service(text)                 to service_role;
+grant  execute on function set_project_services(uuid, uuid[]) to service_role;
+
+-- Project notes: onboarding notes for the client, plus calls, decisions and client requests over time.
+-- Each note belongs to one project and has a type, an author, and an edit history. A project can have
+-- only one onboarding note (it can be edited, not added to). Deleting a project removes its notes.
+create table project_notes (
+  id              uuid primary key default gen_random_uuid(),
+  project_id      uuid not null references projects(id) on delete cascade,
+  kind            text not null default 'general'
+                  check (kind in ('onboarding', 'call', 'decision', 'request', 'general')),
+  body            text not null check (char_length(btrim(body)) between 1 and 5000),
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  created_by_id   uuid references employees(id) on delete set null,
+  created_by_name text,
+  updated_by_id   uuid references employees(id) on delete set null,
+  updated_by_name text
+);
+
+create index project_notes_project_idx on project_notes (project_id, created_at desc);
+create unique index project_notes_one_onboarding on project_notes (project_id) where kind = 'onboarding';
+
+-- Earlier versions of a note. Each row is the text as it stood before an edit replaced it.
+create table project_note_versions (
+  id            uuid primary key default gen_random_uuid(),
+  note_id       uuid not null references project_notes(id) on delete cascade,
+  body          text not null,
+  saved_at      timestamptz not null,   -- when this version was written
+  saved_by_id   uuid references employees(id) on delete set null,
+  saved_by_name text,                   -- who wrote this version
+  replaced_at   timestamptz not null default now()
+);
+
+create index project_note_versions_note_idx on project_note_versions (note_id, saved_at desc);
+
+-- Locked down: row-level security is on with no policies, so only the server can use this table.
+alter table project_notes         enable row level security;
+alter table project_note_versions enable row level security;
+
+-- Adds a note. The author is the logged-in employee (empty until the app has a login). A second
+-- onboarding note for a project is refused.
+create or replace function add_project_note(
+  p_project uuid,
+  p_kind    text,
+  p_body    text,
+  p_author  uuid
+) returns uuid
+language plpgsql
+as $$
+declare
+  v_author text;
+  v_id     uuid;
+begin
+  if not exists (select 1 from projects where id = p_project) then
+    raise exception 'Project not found.';
+  end if;
+  if p_kind not in ('onboarding', 'call', 'decision', 'request', 'general') then
+    raise exception 'Choose a type for the note.';
+  end if;
+  if coalesce(btrim(p_body), '') = '' then
+    raise exception 'Write something in the note.';
+  end if;
+  if char_length(btrim(p_body)) > 5000 then
+    raise exception 'Notes can be 5000 characters at most.';
+  end if;
+  if p_author is not null then
+    select name into v_author from employees where id = p_author;
+    if v_author is null then
+      raise exception 'That employee does not exist.';
+    end if;
+  end if;
+  if p_kind = 'onboarding' and exists (select 1 from project_notes where project_id = p_project and kind = 'onboarding') then
+    raise exception 'This project already has onboarding notes. Edit them instead of adding more.';
+  end if;
+
+  insert into project_notes (project_id, kind, body, created_by_id, created_by_name, updated_by_id, updated_by_name)
+  values (p_project, p_kind, btrim(p_body), p_author, v_author, p_author, v_author)
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- Edits a note's text, keeping the previous version in the history. Saving unchanged text does nothing.
+create or replace function edit_project_note(
+  p_note   uuid,
+  p_body   text,
+  p_editor uuid
+) returns void
+language plpgsql
+as $$
+declare
+  old_note project_notes%rowtype;
+  v_editor text;
+begin
+  select * into old_note from project_notes where id = p_note for update;
+  if not found then
+    raise exception 'Note not found.';
+  end if;
+  if coalesce(btrim(p_body), '') = '' then
+    raise exception 'Write something in the note.';
+  end if;
+  if char_length(btrim(p_body)) > 5000 then
+    raise exception 'Notes can be 5000 characters at most.';
+  end if;
+  if p_editor is not null then
+    select name into v_editor from employees where id = p_editor;
+    if v_editor is null then
+      raise exception 'That employee does not exist.';
+    end if;
+  end if;
+
+  if btrim(old_note.body) = btrim(p_body) then
+    return; -- nothing changed, so no new version
+  end if;
+
+  insert into project_note_versions (note_id, body, saved_at, saved_by_id, saved_by_name)
+  values (
+    old_note.id, old_note.body, old_note.updated_at,
+    coalesce(old_note.updated_by_id, old_note.created_by_id),
+    coalesce(old_note.updated_by_name, old_note.created_by_name)
+  );
+
+  update project_notes
+     set body = btrim(p_body), updated_at = now(), updated_by_id = p_editor, updated_by_name = v_editor
+   where id = p_note;
+end;
+$$;
+
+revoke execute on function add_project_note(uuid, text, text, uuid) from public, anon, authenticated;
+revoke execute on function edit_project_note(uuid, text, uuid)      from public, anon, authenticated;
+grant  execute on function add_project_note(uuid, text, text, uuid) to service_role;
+grant  execute on function edit_project_note(uuid, text, uuid)      to service_role;
+
+-- Report tracking: one row per report that has been marked as SENT. A scheduled report (project + due
+-- date) with no row here has not been sent; once its day has passed it counts as overdue, which is one
+-- of the two things that flag a project "At risk" (the other is an overdue payment).
+create table report_log (
+  project_id uuid not null references projects(id) on delete cascade,
+  due_date   date not null,
+  sent_at    timestamptz not null default now(),
+  primary key (project_id, due_date)
+);
+
+create index report_log_sent_at_idx on report_log (sent_at desc);
+
+-- Locked down: row-level security is on with no policies, so only the server can use this table.
+alter table report_log enable row level security;
 
 -- Project team history: who managed / worked on a project, and from when to when. Written by the
 -- functions below (set_project_team, set_project_status, deactivate_employee), never by hand.
@@ -108,7 +324,6 @@ create unique index if not exists project_team_history_open_manager
 
 alter table project_team_history enable row level security;
 drop policy if exists "public read project_team_history" on project_team_history;
-create policy "public read project_team_history" on project_team_history for select using (true);
 
 -- Sets a project's manager and team in ONE transaction and records the change in the history.
 --   p_manager   the project manager (null = none)
@@ -354,6 +569,104 @@ $$;
 
 revoke execute on function update_employee(uuid, text, text, text) from public, anon, authenticated;
 grant  execute on function update_employee(uuid, text, text, text) to service_role;
+
+-- Login with a one-time code (OTP) sent to the employee's email.
+--  * only an ACTIVE employee's email can get a code
+--  * the 6-digit code itself is never stored, only a keyed hash of it (computed by the app)
+--  * a code works once, for 10 minutes, and gets 5 wrong tries
+--  * limits: one code per email every 30 seconds, 5 per hour per email, 20 per hour per network address
+--  * row-level security is on with NO policies, so nothing but the server can read or write this table
+
+create table login_codes (
+  id         uuid primary key default gen_random_uuid(),
+  email      text not null,              -- lower-case
+  code_hash  text not null,
+  ip         text,
+  expires_at timestamptz not null,
+  attempts   int  not null default 0,
+  used_at    timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index login_codes_email_idx on login_codes (email, created_at desc);
+create index login_codes_ip_idx    on login_codes (ip, created_at desc);
+
+alter table login_codes enable row level security;
+
+-- Prepares a code for an email. Returns 'sent' (the app should now email the code), 'unknown' (not an
+-- active employee, so nothing is sent) or 'limited' (too many requests). The app shows the same message
+-- for all three, so nobody can use the login page to find out which emails exist.
+create or replace function login_issue_code(
+  p_email       text,
+  p_code_hash   text,
+  p_ip          text default null,
+  p_ttl_minutes int  default 10
+) returns text
+language plpgsql
+as $$
+declare
+  v_email text := lower(btrim(coalesce(p_email, '')));
+begin
+  if v_email = '' or not exists (
+    select 1 from employees where lower(btrim(email)) = v_email and is_active
+  ) then
+    return 'unknown';
+  end if;
+
+  if exists (select 1 from login_codes where email = v_email and created_at > now() - interval '30 seconds') then
+    return 'limited';
+  end if;
+  if (select count(*) from login_codes where email = v_email and created_at > now() - interval '1 hour') >= 5 then
+    return 'limited';
+  end if;
+  if p_ip is not null and (select count(*) from login_codes where ip = p_ip and created_at > now() - interval '1 hour') >= 20 then
+    return 'limited';
+  end if;
+
+  -- a new code replaces any earlier unused one
+  update login_codes set used_at = now() where email = v_email and used_at is null;
+  insert into login_codes (email, code_hash, ip, expires_at)
+  values (v_email, p_code_hash, p_ip, now() + make_interval(mins => p_ttl_minutes));
+
+  delete from login_codes where created_at < now() - interval '1 day';
+  return 'sent';
+end;
+$$;
+
+-- Checks a code. Returns the employee's id when it is right, otherwise null. A right code is used up;
+-- a wrong one counts as a try, and after 5 the code no longer works.
+create or replace function login_check_code(p_email text, p_code_hash text) returns uuid
+language plpgsql
+as $$
+declare
+  v_email text := lower(btrim(coalesce(p_email, '')));
+  c       login_codes%rowtype;
+  v_emp   uuid;
+begin
+  select * into c from login_codes
+   where email = v_email and used_at is null and expires_at > now()
+   order by created_at desc
+   limit 1
+   for update;
+  if not found or c.attempts >= 5 then
+    return null;
+  end if;
+
+  if c.code_hash <> coalesce(p_code_hash, '') then
+    update login_codes set attempts = attempts + 1 where id = c.id;
+    return null;
+  end if;
+
+  update login_codes set used_at = now() where id = c.id;
+  select id into v_emp from employees where lower(btrim(email)) = v_email and is_active;
+  return v_emp; -- null if they were deactivated since the code was sent
+end;
+$$;
+
+revoke execute on function login_issue_code(text, text, text, int) from public, anon, authenticated;
+revoke execute on function login_check_code(text, text)            from public, anon, authenticated;
+grant  execute on function login_issue_code(text, text, text, int) to service_role;
+grant  execute on function login_check_code(text, text)            to service_role;
 
 -- Sample data (optional, delete if you don't want it)
 insert into employees (name, email, role) values

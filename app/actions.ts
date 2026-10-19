@@ -6,6 +6,8 @@ import { isPaymentMethod, isPaymentTerm, projectionMonths } from "@/lib/payments
 import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
 import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
+import { isNoteKind } from "@/lib/notes";
+import { requireEmployee } from "@/lib/auth";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
 // "" and "none" (the select's "— None —" option) both mean no project manager
@@ -54,6 +56,27 @@ function parsePayment(formData: FormData) {
   return { payment_date, payment_term, payment_method, payment_amount_usd: Math.round(amount * 100) / 100 };
 }
 
+/** How many services were chosen: ticked ones plus new names typed in. */
+function serviceCount(formData: FormData) {
+  const ids = formData.getAll("services").map(String).filter(Boolean);
+  const names = formData.getAll("new_services").map((v) => String(v).trim()).filter(Boolean);
+  return ids.length + names.length;
+}
+
+/** Saves a project's services. New names are created first (typing an existing name just picks it). */
+async function saveServices(projectId: string, formData: FormData) {
+  const ids = formData.getAll("services").map(String).filter(Boolean);
+  for (const raw of formData.getAll("new_services")) {
+    const name = String(raw).trim();
+    if (!name) continue;
+    const { data, error } = await supabaseAdmin.rpc("add_service", { p_name: name });
+    if (error) throw new Error(error.message);
+    ids.push(data as string);
+  }
+  const { error } = await supabaseAdmin.rpc("set_project_services", { p_project: projectId, p_services: [...new Set(ids)] });
+  if (error) throw new Error(error.message);
+}
+
 /**
  * Sets the manager and team through the database, which also records who worked on the project and
  * from when to when. `effective` is the date the change took effect (earlier than today for a handover
@@ -70,6 +93,7 @@ async function setTeam(projectId: string, managerId: string | null, memberIds: s
 }
 
 export async function createProject(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
   const websiteRaw = str(formData.get("website"));
@@ -83,6 +107,7 @@ export async function createProject(formData: FormData) {
   }
   const payment = parsePayment(formData);
   const backfillUntil = parseBackfill(formData, payment.payment_date);
+  if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
   const { data, error } = await supabaseAdmin
     .from("projects")
@@ -97,6 +122,27 @@ export async function createProject(formData: FormData) {
     .select("id")
     .single();
   if (error) throw new Error(error.message);
+
+  try {
+    await saveServices(data.id, formData);
+  } catch (e) {
+    throw new Error(
+      `The project was saved, but saving its services failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to set them.`
+    );
+  }
+
+  const onboardingNotes = str(formData.get("onboarding_notes"));
+  if (onboardingNotes) {
+    const { error: nErr } = await supabaseAdmin.rpc("add_project_note", {
+      p_project: data.id,
+      p_kind: "onboarding",
+      p_body: onboardingNotes,
+      p_author: me.id,
+    });
+    if (nErr) {
+      throw new Error(`The project was saved, but the onboarding notes were not: ${nErr.message} Add them from the Onboarding notes button.`);
+    }
+  }
 
   // The team starts working on the project from its onboarding date.
   try {
@@ -114,6 +160,7 @@ export async function createProject(formData: FormData) {
 }
 
 export async function updateProject(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const project_id = str(formData.get("project_id"));
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
@@ -126,6 +173,7 @@ export async function updateProject(formData: FormData) {
   }
   const payment = parsePayment(formData);
   const backfillUntil = parseBackfill(formData, payment.payment_date);
+  if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
   const { error } = await supabaseAdmin
     .from("projects")
@@ -139,6 +187,8 @@ export async function updateProject(formData: FormData) {
     })
     .eq("id", project_id);
   if (error) throw new Error(error.message);
+
+  await saveServices(project_id, formData);
 
   // Manager and team: the database closes the stretch of anyone who left and opens one for anyone who
   // joined, dated `effective_date` (today unless you record an earlier handover).
@@ -165,6 +215,7 @@ async function canonicalRole(roleRaw: string) {
 }
 
 export async function createEmployee(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const name = str(formData.get("name"));
   const email = str(formData.get("email")).toLowerCase();
   const roleRaw = str(formData.get("role"));
@@ -184,6 +235,7 @@ export async function createEmployee(formData: FormData) {
 }
 
 export async function updateEmployee(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const employee_id = str(formData.get("employee_id"));
   const name = str(formData.get("name"));
   const email = str(formData.get("email")).toLowerCase();
@@ -210,6 +262,7 @@ export async function updateEmployee(formData: FormData) {
 }
 
 export async function deactivateEmployee(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -225,6 +278,7 @@ export async function deactivateEmployee(formData: FormData) {
 }
 
 export async function reactivateEmployee(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -236,6 +290,7 @@ export async function reactivateEmployee(formData: FormData) {
 }
 
 export async function deleteEmployee(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -259,6 +314,7 @@ export async function deleteEmployee(formData: FormData) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function markPaid(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const project_id = str(formData.get("project_id"));
   const due_date = str(formData.get("due_date"));
   if (!project_id || !DATE_RE.test(due_date)) throw new Error("Missing project or due date.");
@@ -310,6 +366,7 @@ export async function markPaid(formData: FormData) {
 
 /** Puts a paid payment back to unpaid. The row stays; nothing is deleted. */
 export async function undoPaid(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const project_id = str(formData.get("project_id"));
   const due_date = str(formData.get("due_date"));
   if (!project_id || !DATE_RE.test(due_date)) return;
@@ -327,6 +384,7 @@ export async function undoPaid(formData: FormData) {
 
 /** Runs the monthly job for the current month on demand (same code the scheduled job runs). */
 export async function openDuesNow(): Promise<{ ok: boolean; message: string }> {
+  await requireEmployee(); // nobody signed in, nothing happens
   try {
     const month = projectionMonths(todayISO(), 1)[0];
     const r = await openDuesForMonth(month);
@@ -345,6 +403,7 @@ export async function openDuesNow(): Promise<{ ok: boolean; message: string }> {
 }
 
 export async function changeProjectStatus(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
   const project_id = str(formData.get("project_id"));
   const status = str(formData.get("status"));
   const reason = str(formData.get("reason"));
@@ -363,4 +422,90 @@ export async function changeProjectStatus(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/projects");
   revalidatePath("/people");
+}
+
+/** Records that a project's report for `due_date` has been sent. */
+export async function markReportSent(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const project_id = str(formData.get("project_id"));
+  const due_date = str(formData.get("due_date"));
+  if (!project_id || !/^\d{4}-\d{2}-\d{2}$/.test(due_date)) throw new Error("Missing project or report date.");
+
+  const { error } = await supabaseAdmin
+    .from("report_log")
+    .upsert({ project_id, due_date }, { onConflict: "project_id,due_date", ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/");
+  revalidatePath("/reports");
+  revalidatePath("/projects");
+}
+
+/** Puts a report back to "not sent". The row is removed, nothing else changes. */
+export async function undoReportSent(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const project_id = str(formData.get("project_id"));
+  const due_date = str(formData.get("due_date"));
+  if (!project_id || !/^\d{4}-\d{2}-\d{2}$/.test(due_date)) return;
+
+  const { error } = await supabaseAdmin.from("report_log").delete().eq("project_id", project_id).eq("due_date", due_date);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/");
+  revalidatePath("/reports");
+  revalidatePath("/projects");
+}
+
+function refreshNotes() {
+  revalidatePath("/projects");
+  revalidatePath("/onboarding");
+}
+
+/** Adds a note. The database refuses a second onboarding note for a project and requires an author. */
+export async function addNote(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const project_id = str(formData.get("project_id"));
+  const kind = str(formData.get("kind")) || "general";
+  if (!project_id) throw new Error("Missing project.");
+  if (!isNoteKind(kind)) throw new Error("Choose a type for the note.");
+
+  const { error } = await supabaseAdmin.rpc("add_project_note", {
+    p_project: project_id,
+    p_kind: kind,
+    p_body: str(formData.get("body")),
+    p_author: me.id,
+  });
+  if (error) throw new Error(error.message);
+  refreshNotes();
+}
+
+/** Edits a note's text. The database keeps the previous version and records who edited. */
+export async function updateNote(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const id = str(formData.get("id"));
+  if (!id) throw new Error("Missing note.");
+
+  const { error } = await supabaseAdmin.rpc("edit_project_note", {
+    p_note: id,
+    p_body: str(formData.get("body")),
+    p_editor: me.id,
+  });
+  if (error) throw new Error(error.message);
+  refreshNotes();
+}
+
+/** Deletes a note, except onboarding notes: those can be edited but never removed. */
+export async function deleteNote(formData: FormData) {
+  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const id = str(formData.get("id"));
+  if (!id) return;
+
+  const { data, error: gErr } = await supabaseAdmin.from("project_notes").select("kind").eq("id", id).maybeSingle();
+  if (gErr) throw new Error(gErr.message);
+  if (!data) return;
+  if (data.kind === "onboarding") throw new Error("Onboarding notes can be edited but not deleted.");
+
+  const { error } = await supabaseAdmin.from("project_notes").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+  refreshNotes();
 }

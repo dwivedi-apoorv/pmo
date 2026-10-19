@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseIcon, FolderKanbanIcon, LayoutDashboardIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -15,17 +16,19 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { signOut } from "@/app/(auth)/login/actions";
 
 // To add a menu item, add a line here.
 const PAGES = [
   { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
   { title: "Projects", href: "/projects", icon: BriefcaseIcon },
   { title: "Payments", href: "/payments", icon: WalletIcon },
+  { title: "Reports", href: "/reports", icon: FileTextIcon },
   { title: "Onboarding", href: "/onboarding", icon: UserRoundPlusIcon },
   { title: "Employees", href: "/people", icon: UsersIcon },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ user }: { user: { name: string; email: string } }) {
   const pathname = usePathname();
 
   return (
@@ -55,6 +58,22 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter>
+        <div className="grid gap-1.5 px-2 py-1.5 text-sm">
+          <div className="min-w-0">
+            <p className="truncate font-medium" title={user.name}>{user.name}</p>
+            <p className="truncate text-xs text-muted-foreground" title={user.email}>{user.email}</p>
+          </div>
+          <form action={signOut}>
+            <button
+              type="submit"
+              className="inline-flex items-center gap-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground"
+            >
+              <LogOutIcon className="size-3.5" /> Sign out
+            </button>
+          </form>
+        </div>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
