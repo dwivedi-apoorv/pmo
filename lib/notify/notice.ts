@@ -7,7 +7,7 @@ export type Notice = {
   letter?: Line[][];
 };
 /** One line of a letter: an optional bold label, the text, and optionally a link on the text. */
-export type Line = { label?: string; text: string; href?: string };
+export type Line = { label?: string; text: string; href?: string; items?: string[] }; // `items` = a bullet list under the label
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const mdEsc = (s: string) => s.replace(/([\\`*_{}\[\]<>#|])/g, "\\$1");
@@ -15,15 +15,22 @@ const mdEsc = (s: string) => s.replace(/([\\`*_{}\[\]<>#|])/g, "\\$1");
 /** HTML for a Teams chat message sent through Microsoft Graph. */
 const htmlLine = (l: Line) => {
   const text = esc(l.text).replace(/\r?\n/g, "<br>");
-  return `${l.label ? `<b>${esc(l.label)}:</b> ` : ""}${l.href ? `<a href="${esc(l.href)}">${text}</a>` : text}`;
+  const head = `${l.label ? `<b>${esc(l.label)}:</b> ` : ""}${l.href ? `<a href="${esc(l.href)}">${text}</a>` : text}`;
+  return l.items ? `<b>${esc(l.label ?? "")}:</b><ul>${l.items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : head;
 };
 const mdLine = (l: Line) => {
   const text = mdEsc(l.text).replace(/\r?\n/g, "  \n");
+  if (l.items) return `**${mdEsc(l.label ?? "")}:**\n\n${l.items.map((i) => `- ${mdEsc(i)}`).join("\n")}`;
   return `${l.label ? `**${mdEsc(l.label)}:** ` : ""}${l.href ? `[${text}](${l.href})` : text}`;
+};
+// Teams squeezes <p> spacing in chats, so paragraphs are separated with explicit blank lines.
+const htmlLetter = (paras: Line[][]) => {
+  const out = paras.map((para) => para.map(htmlLine).join("<br>"));
+  return `<div>${out.map((p, i) => p + (i === out.length - 1 ? "" : p.endsWith("</ul>") ? "<br>" : "<br><br>")).join("")}</div>`;
 };
 
 export function toHtml(n: Notice): string {
-  if (n.letter) return n.letter.map((para) => `<p>${para.map(htmlLine).join("<br>")}</p>`).join("");
+  if (n.letter) return htmlLetter(n.letter);
   const parts = [`<p><b>${esc(n.title)}</b></p>`];
   for (const s of n.sections) parts.push(`<p><b>${esc(s.heading)}</b></p><ul>${s.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`);
   if (n.link) parts.push(`<p><a href="${esc(n.link.url)}">${esc(n.link.label)}</a></p>`);

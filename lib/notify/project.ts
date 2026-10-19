@@ -27,21 +27,20 @@ export function webLink(raw: string | null): string | null {
 /** The message a person gets when a project is assigned to them. */
 export function assignedNotice(p: AssignedProject, sender: string): Notice {
   const site = webLink(p.website);
-  const details: Line[] = [
-    { label: "Project Name", text: p.name },
-    { label: "Client Name", text: p.client_name },
-    ...(p.website?.trim() ? [{ label: "Website", text: p.website.trim(), href: site ?? undefined }] : []),
-    { label: "Onboarded on", text: date(p.onboarding_date) },
-    { label: "Offered Services", text: p.services.length ? p.services.join(", ") : "None yet" },
-  ];
+  const services = p.services.length > 1 ? { label: "Offered Services", text: "", items: p.services } : { label: "Offered Services", text: p.services[0] ?? "None yet" };
+  const field = (label: string, text: string, href?: string): Line[] => [{ label, text, href }];
   return {
     title: `New project assigned: ${p.name}`,
     sections: [],
     letter: [
       [{ text: "Hello, a new project is assigned to you." }],
-      details,
-      [{ label: "Project Manager", text: p.manager ?? "Not assigned" }],
-      [{ label: "Onboarding Notes", text: p.onboarding_notes?.trim() || "None yet" }],
+      field("Project Name", p.name),
+      field("Client Name", p.client_name),
+      ...(p.website?.trim() ? [field("Website", p.website.trim(), site ?? undefined)] : []),
+      field("Onboarded on", date(p.onboarding_date)),
+      [services],
+      field("Project Manager", p.manager ?? "Not assigned"),
+      field("Onboarding Notes", p.onboarding_notes?.trim() || "None yet"),
       [{ text: "Regards," }, { text: sender }],
     ],
   };
