@@ -21,7 +21,7 @@ export async function sendLoginCode(to: string, code: string): Promise<void> {
     body: JSON.stringify({
       from,
       to: [to],
-      subject: `Your PMO login code: ${code}`,
+      subject: `Your PMO Portal login code: ${code}`,
       text: `Your login code is ${code}\n\nIt works once and expires in 10 minutes. If you did not ask for it, you can ignore this email.`,
       html: `<div style="font-family:system-ui,sans-serif;font-size:15px;color:#111">
         <p>Your PMO login code:</p>
@@ -33,6 +33,13 @@ export async function sendLoginCode(to: string, code: string): Promise<void> {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new Error(`Resend refused the email (${res.status}). ${detail.slice(0, 200)}`);
+    const problem = `Resend refused the email (${res.status}). ${detail.slice(0, 200)}`;
+    // On your own computer, don't get locked out while Resend is still being set up (for example the
+    // domain isn't verified yet): show the code in the terminal. This never happens in production.
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`\n[login] ${problem}\n[login] Dev only: code for ${to} is ${code}\n`);
+      return;
+    }
+    throw new Error(problem);
   }
 }

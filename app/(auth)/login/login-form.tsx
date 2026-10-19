@@ -70,6 +70,7 @@ export function LoginForm({ next }: { next: string }) {
               <Input
                 id="code"
                 name="code"
+                type="password" // hides the digits as you type, like a password
                 inputMode="numeric"
                 autoComplete="one-time-code"
                 pattern="[0-9 ]*"
