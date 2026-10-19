@@ -1,0 +1,30 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "{{BOT_ID}}",
+  "developer": {
+    "name": "PMO",
+    "websiteUrl": "{{APP_URL}}",
+    "privacyUrl": "{{APP_URL}}",
+    "termsOfUseUrl": "{{APP_URL}}"
+  },
+  "name": { "short": "PMO", "full": "PMO notifications" },
+  "description": {
+    "short": "Project and payment reminders from your PMO.",
+    "full": "Sends you a daily summary of reports and payments that need attention, and tells you when you are added to a project."
+  },
+  "icons": { "color": "color.png", "outline": "outline.png" },
+  "accentColor": "#1F3A5F",
+  "bots": [
+    {
+      "botId": "{{BOT_ID}}",
+      "scopes": ["personal"],
+      "isNotificationOnly": false,
+      "supportsFiles": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": [],
+  "webApplicationInfo": { "id": "{{BOT_ID}}", "resource": "api://botid-{{BOT_ID}}" }
+}

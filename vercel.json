@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/open-dues",
       "schedule": "30 3 1 * *"
+    },
+    {
+      "path": "/api/cron/notify",
+      "schedule": "30 3 * * *"
     }
   ]
 }

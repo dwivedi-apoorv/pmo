@@ -3,3 +3,7 @@ node_modules
 .env.local
 next-env.d.ts
 .env
+
+# Teams app package (generated)
+/teams-app/build/
+/teams-app/*.zip

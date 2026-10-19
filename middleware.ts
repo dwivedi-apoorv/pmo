@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 // The front door. Every page needs a valid login cookie, except the login page itself and the monthly
-// job (which has its own secret). Server actions post to page URLs, so they are covered too, and each
+// jobs (which have their own secret) and the Teams bot endpoint (which checks Microsoft's signature). Server actions post to page URLs, so they are covered too, and each
 // action checks again on its own.
 export async function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
@@ -19,5 +19,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!api/cron|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)"],
+  matcher: ["/((?!api/cron|api/teams/messages|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico)$).*)"],
 };

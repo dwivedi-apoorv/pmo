@@ -1,6 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
+import { notifyAssigned } from "@/lib/notify/run";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isPaymentMethod, isPaymentTerm, projectionMonths } from "@/lib/payments";
 import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
@@ -54,6 +56,26 @@ function parsePayment(formData: FormData) {
     throw new Error("Enter a valid payment amount in USD.");
   }
   return { payment_date, payment_term, payment_method, payment_amount_usd: Math.round(amount * 100) / 100 };
+}
+
+/** Who is on a project right now: used to tell people when they have just been added. */
+async function currentTeam(projectId: string) {
+  const [p, a] = await Promise.all([
+    supabaseAdmin.from("projects").select("project_manager_id").eq("id", projectId).maybeSingle(),
+    supabaseAdmin.from("project_assignments").select("employee_id").eq("project_id", projectId),
+  ]);
+  return {
+    manager: (p.data?.project_manager_id as string | null) ?? null,
+    members: new Set((a.data ?? []).map((r) => r.employee_id as string)),
+  };
+}
+
+/** People who are on the new team but weren't on the old one. */
+function newlyAdded(before: { manager: string | null; members: Set<string> }, manager: string | null, members: string[]) {
+  const added: { employeeId: string; role: "Project manager" | "Team member" }[] = [];
+  if (manager && manager !== before.manager) added.push({ employeeId: manager, role: "Project manager" });
+  for (const m of members) if (!before.members.has(m) && m !== manager) added.push({ employeeId: m, role: "Team member" });
+  return added;
 }
 
 /** How many services were chosen: ticked ones plus new names typed in. */
@@ -147,6 +169,8 @@ export async function createProject(formData: FormData) {
   // The team starts working on the project from its onboarding date.
   try {
     await setTeam(data.id, project_manager_id, assignees, onboarding_date);
+    const added = newlyAdded({ manager: null, members: new Set() }, project_manager_id, assignees);
+    if (added.length) after(() => notifyAssigned(data.id, added, me.id)); // after the response, so saving never waits on Teams
   } catch (e) {
     throw new Error(
       `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
@@ -195,12 +219,12 @@ export async function updateProject(formData: FormData) {
   const effective = str(formData.get("effective_date")) || todayISO();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(effective)) throw new Error("Enter a valid date for when the change took effect.");
   if (effective > todayISO()) throw new Error("The change can't take effect in the future.");
-  await setTeam(
-    project_id,
-    pmId(formData.get("project_manager_id")),
-    formData.getAll("assignees").map(String).filter(Boolean),
-    effective
-  );
+  const newManager = pmId(formData.get("project_manager_id"));
+  const newMembers = formData.getAll("assignees").map(String).filter(Boolean);
+  const before = await currentTeam(project_id);
+  await setTeam(project_id, newManager, newMembers, effective);
+  const added = newlyAdded(before, newManager, newMembers);
+  if (added.length) after(() => notifyAssigned(project_id, added, me.id));
 
   await runBackfill(project_id, payment, backfillUntil);
   revalidatePath("/payments");
