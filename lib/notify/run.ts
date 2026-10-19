@@ -6,7 +6,7 @@ import type { Due } from "@/lib/dues";
 import type { ReportSend } from "@/lib/reports";
 import { buildDigests, type DigestEmployee, type DigestProject } from "@/lib/notify/digest";
 import type { Notice } from "@/lib/notify/notice";
-import { Sender, type Recipient } from "@/lib/notify/send";
+import { Sender, getDisabledKinds, type Recipient } from "@/lib/notify/send";
 
 export type DigestRun = { method: string; people: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
 
@@ -33,7 +33,15 @@ export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<Di
     assignees: (p.project_assignments ?? []).map((a: { employee_id: string }) => a.employee_id),
   }));
   const employees = (employeesRes.data ?? []) as DigestEmployee[];
-  const digests = buildDigests({ projects, ledger: ledgerRes.data ?? [], sends: sendsRes.data ?? [], employees, appUrl: appUrl() });
+  const off = await getDisabledKinds();
+  const digests = buildDigests({
+    projects,
+    ledger: ledgerRes.data ?? [],
+    sends: sendsRes.data ?? [],
+    employees,
+    appUrl: appUrl(),
+    include: { reports: !off.has("reports"), payments: !off.has("payments") },
+  });
 
   const sender = await Sender.open();
   const run: DigestRun = { method: sender.method, people: digests.size, sent: 0, failed: 0, skipped: 0, alreadySent: 0, failures: [] };
@@ -74,6 +82,7 @@ export async function notifyAssigned(
   actorId: string
 ) {
   try {
+    if ((await getDisabledKinds()).has("assigned")) return;
     const who = added.filter((a) => a.employeeId !== actorId); // don't tell people about their own change
     if (!who.length) return;
     const [{ data: project }, { data: people }] = await Promise.all([

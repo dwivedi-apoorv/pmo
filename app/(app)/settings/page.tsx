@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requirePageUser } from "@/lib/auth";
 import { appUrl, botConfigured, isAdmin, userAppConfigured } from "@/lib/ms/config";
-import { getConnection, getMethod } from "@/lib/notify/send";
+import { NOTIFICATION_KINDS, getConnection, getDisabledKinds, getMethod } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { noteDateTime } from "@/lib/notes";
 import { PageHeader } from "@/components/page-header";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DisconnectButton, InstallBotButton, TestMessageButton } from "./controls";
-import { saveMethod } from "./actions";
+import { saveKinds, saveMethod } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +31,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   if (!isAdmin(me.email)) redirect("/");
   const sp = await searchParams;
 
-  const [method, connection, botChats, people, log] = await Promise.all([
+  const [method, off, connection, botChats, people, log] = await Promise.all([
     getMethod(),
+    getDisabledKinds(),
     getConnection(),
     supabaseAdmin.from("teams_chats").select("employee_id").eq("method", "bot"),
     supabaseAdmin.from("employees").select("id, name, email").eq("is_active", true).order("name"),
@@ -63,6 +64,27 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <span>
                   <span className="block text-sm font-medium">{m.title}</span>
                   <span className="block text-sm text-muted-foreground">{m.text}</span>
+                </span>
+              </label>
+            ))}
+            <div><Button type="submit">Save</Button></div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>What gets sent</CardTitle>
+          <CardDescription>Untick anything you don&apos;t want sent. It applies to everyone.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form action={saveKinds} className="grid gap-3">
+            {NOTIFICATION_KINDS.map((k) => (
+              <label key={k.key} className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+                <input type="checkbox" name="kind" value={k.key} defaultChecked={!off.has(k.key)} className="mt-1" />
+                <span>
+                  <span className="block text-sm font-medium">{k.title}</span>
+                  <span className="block text-sm text-muted-foreground">{k.text}</span>
                 </span>
               </label>
             ))}

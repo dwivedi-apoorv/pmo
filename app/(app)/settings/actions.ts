@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentEmployee } from "@/lib/auth";
 import { isAdmin } from "@/lib/ms/config";
-import { Sender, getMethod, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
+import { NOTIFICATION_KINDS, Sender, getMethod, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 async function requireAdmin() {
@@ -17,6 +17,13 @@ export async function saveMethod(formData: FormData) {
   const method = String(formData.get("method") ?? "");
   if (!["off", "user", "bot", "auto"].includes(method)) throw new Error("Choose how messages are sent.");
   await setMethod(method as Method);
+  revalidatePath("/settings");
+}
+
+export async function saveKinds(formData: FormData) {
+  await requireAdmin();
+  const on = new Set(formData.getAll("kind").map(String));
+  await setDisabledKinds(NOTIFICATION_KINDS.map((k) => k.key).filter((k) => !on.has(k)));
   revalidatePath("/settings");
 }
 

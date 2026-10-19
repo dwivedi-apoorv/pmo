@@ -34,6 +34,7 @@ export function buildDigests(input: {
   employees: DigestEmployee[];
   appUrl: string;
   today?: string;
+  include?: { reports: boolean; payments: boolean }; // default: both
 }): Map<string, Notice> {
   const today = input.today ?? todayISO();
   const byId = new Map(input.projects.map((p) => [p.id, p]));
@@ -47,14 +48,16 @@ export function buildDigests(input: {
     if (who && people.has(who)) map.set(who, [...(map.get(who) ?? []), line]);
   };
 
-  for (const r of reportAttention(active, input.sends, today)) {
+  const inc = input.include ?? { reports: true, payments: true };
+
+  for (const r of inc.reports ? reportAttention(active, input.sends, today) : []) {
     const p = byId.get(r.project_id)!;
     const line = { days: r.days, text: `${p.name} (${p.client_name}): ${when(r.days)} · due ${r.due}` };
     const recipients = new Set([p.project_manager_id, ...p.assignees]);
     for (const who of recipients) add(reports, who, line);
   }
 
-  for (const r of attentionRows(active, input.ledger, today)) {
+  for (const r of inc.payments ? attentionRows(active, input.ledger, today) : []) {
     const p = byId.get(r.project_id);
     if (!p) continue;
     const tag = p.status === "active" ? "" : ` [${p.status}]`;

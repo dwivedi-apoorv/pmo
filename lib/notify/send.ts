@@ -29,6 +29,23 @@ export async function setMethod(method: Method) {
   if (error) throw new Error(error.message);
 }
 
+export const NOTIFICATION_KINDS = [
+  { key: "reports", title: "Reports due", text: "In the daily summary: reports that are due soon or overdue. Goes to the project's manager and its team." },
+  { key: "payments", title: "Payments due", text: "In the daily summary: payments that are due soon or overdue. Goes to the project's manager." },
+  { key: "assigned", title: "Added to a project", text: "Sent straight away when someone is made manager or team member of a project." },
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]["key"];
+
+export async function getDisabledKinds(): Promise<Set<string>> {
+  const { data } = await supabaseAdmin.from("notification_settings").select("disabled_kinds").eq("id", 1).maybeSingle();
+  return new Set((data?.disabled_kinds as string[] | null) ?? []);
+}
+
+export async function setDisabledKinds(kinds: string[]) {
+  const { error } = await supabaseAdmin.from("notification_settings").upsert({ id: 1, disabled_kinds: kinds });
+  if (error) throw new Error(error.message);
+}
+
 export type Connection = {
   account_id: string | null;
   account_email: string | null;

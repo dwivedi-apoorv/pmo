@@ -677,7 +677,8 @@ grant  execute on function login_check_code(text, text)            to service_ro
 
 create table notification_settings (
   id     int primary key default 1 check (id = 1),
-  method text not null default 'off' check (method in ('off', 'user', 'bot', 'auto'))
+  method text not null default 'off' check (method in ('off', 'user', 'bot', 'auto')),
+  disabled_kinds text[] not null default '{}'  -- kinds switched off: 'reports', 'payments', 'assigned'
   -- off  = send nothing
   -- user = send as the connected Microsoft account
   -- bot  = send from the Teams bot
