@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { isProjectManager, loadPeople } from "@/lib/people";
 import type { ProjectStatus } from "@/lib/status";
 import { reactivateEmployee } from "@/app/actions";
+import { EditEmployeeDialog } from "@/components/edit-employee-dialog";
 import { DeactivateEmployeeDialog } from "@/components/deactivate-employee-dialog";
 import { DeleteEmployeeDialog } from "@/components/delete-employee-dialog";
 import { PageHeader } from "@/components/page-header";
@@ -150,7 +151,8 @@ export default async function PeoplePage({
                       {managedOpen.length} managing · {assignedOpen.length} assigned
                     </TableCell>
                     <TableCell>
-                      <div className="flex justify-end gap-2">
+                      <div className="flex items-center justify-end gap-2">
+                        <EditEmployeeDialog employee={{ id: e.id, name: e.name, email: e.email, role: e.role }} roles={roles} />
                         {e.is_active ? (
                           <DeactivateEmployeeDialog
                             employee={{ id: e.id, name: e.name }}

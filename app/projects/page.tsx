@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 import { COLUMNS, HIDDEN_COLUMNS_COOKIE, parseHidden, type ColumnId } from "@/lib/columns";
 import { loadPeople } from "@/lib/people";
 import { overdueSince, type Due } from "@/lib/dues";
+import type { TeamPeriod } from "@/lib/history";
 import { nextReportDate } from "@/lib/reporting";
 import {
   formatUSD,
@@ -61,7 +62,7 @@ export default async function ProjectsPage({
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
 
-  const [projectsRes, peopleRes, ledgerRes, statusRes] = await Promise.all([
+  const [projectsRes, peopleRes, ledgerRes, statusRes, historyRes] = await Promise.all([
     supabase
       .from("projects")
       .select(
@@ -79,9 +80,13 @@ export default async function ProjectsPage({
       .select("project_id, status, reason, changed_at")
       .order("changed_at", { ascending: false })
       .returns<StatusLogRow[]>(),
+    supabase
+      .from("project_team_history")
+      .select("id, project_id, employee_id, employee_name, role, started_on, ended_on")
+      .returns<TeamPeriod[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? statusRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? statusRes.error ?? historyRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -296,6 +301,7 @@ export default async function ProjectsPage({
                         people={peopleOptions}
                         managerId={p.project_manager_id}
                         assigneeIds={assigned.map((e) => e.id)}
+                        history={(historyRes.data ?? []).filter((h) => h.project_id === p.id)}
                       />
                       <ProjectStatusMenu id={p.id} name={p.name} status={p.status} />
                       </div>

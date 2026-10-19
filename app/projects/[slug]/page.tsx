@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { loadPeople } from "@/lib/people";
 import { nextReportDate } from "@/lib/reporting";
+import { ROLE_LABEL, periodDuration, type TeamPeriod } from "@/lib/history";
 import { STATUS_LABEL, STATUS_ORDER, type ProjectStatus } from "@/lib/status";
 import { AssigneeBadges } from "@/components/assignee-badges";
 import { WebsiteLink } from "@/components/website-link";
@@ -67,6 +68,22 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ slu
       </div>
     );
   }
+
+  type Stretch = TeamPeriod & { projects: { name: string; client_name: string; status: ProjectStatus } | null };
+  const historyRes = await supabase
+    .from("project_team_history")
+    .select("id, project_id, employee_id, employee_name, role, started_on, ended_on, projects(name, client_name, status)")
+    .eq("employee_id", id)
+    .order("started_on", { ascending: false })
+    .returns<Stretch[]>();
+  if (historyRes.error) {
+    return (
+      <div className="w-full p-6">
+        <p className="text-destructive">Could not load data: {historyRes.error.message}</p>
+      </div>
+    );
+  }
+  const stretches = historyRes.data ?? [];
 
   const projects = [...(projectsRes.data ?? [])].sort(
     (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
@@ -153,6 +170,57 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ slu
                 <TableRow>
                   <TableCell colSpan={9} className="text-center text-muted-foreground">
                     No projects yet.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Project history
+            <span className="ml-2 text-sm font-normal text-muted-foreground">{stretches.length}</span>
+          </CardTitle>
+          <CardDescription>
+            Every project {person.name} has been on, in any role, and from when to when. Includes projects they were
+            moved off.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Project</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>From</TableHead>
+                <TableHead>To</TableHead>
+                <TableHead className="text-right">Duration</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {stretches.map((h) => (
+                <TableRow key={h.id}>
+                  <TableCell className="font-medium">
+                    {h.projects?.name ?? "Unknown project"}
+                    {h.projects && <span className="font-normal text-muted-foreground"> · {h.projects.client_name}</span>}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{ROLE_LABEL[h.role]}</Badge>
+                  </TableCell>
+                  <TableCell className="tabular-nums">{h.started_on}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {h.ended_on ?? <Badge variant="default">Current</Badge>}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-muted-foreground">{periodDuration(h)}</TableCell>
+                </TableRow>
+              ))}
+              {stretches.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    No project history yet.
                   </TableCell>
                 </TableRow>
               )}

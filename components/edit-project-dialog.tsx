@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import type { EmployeeOption } from "@/components/employee-select";
 import { ProjectPeopleFields } from "@/components/project-people-fields";
+import { ProjectHistory } from "@/components/project-history";
+import type { TeamPeriod } from "@/lib/history";
 import { ProjectFields, type ProjectValues } from "@/components/project-fields";
 import { updateProject } from "@/app/actions";
 
@@ -23,6 +25,7 @@ export function EditProjectDialog({
   people,
   managerId,
   assigneeIds,
+  history,
 }: {
   id: string;
   values: ProjectValues;
@@ -30,7 +33,9 @@ export function EditProjectDialog({
   people: EmployeeOption[];
   managerId: string | null;
   assigneeIds: string[];
+  history: TeamPeriod[];
 }) {
+  const [tab, setTab] = useState<"details" | "history">("details");
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -62,20 +67,51 @@ export function EditProjectDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form action={onSubmit} className="grid gap-4">
-          <input type="hidden" name="project_id" value={id} />
-          <ProjectFields values={values} />
-          <ProjectPeopleFields
-            managers={managers}
-            people={people}
-            defaultManagerId={managerId}
-            defaultAssigneeIds={assigneeIds}
-          />
-          {error && <p className="text-sm text-destructive">{error}</p>}
-          <Button type="submit" disabled={pending}>
-            {pending ? "Saving…" : "Save changes"}
-          </Button>
-        </form>
+        <div role="tablist" aria-label="Project" className="inline-flex w-fit rounded-lg bg-muted p-1 text-sm">
+          {(
+            [
+              ["details", "Details"],
+              ["history", `History (${history.length})`],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              id={`tab-${key}-${id}`}
+              aria-selected={tab === key}
+              aria-controls={`panel-${key}-${id}`}
+              onClick={() => setTab(key)}
+              className={`rounded-md px-3 py-1 transition-colors ${
+                tab === key ? "bg-background font-medium shadow-sm" : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Both panels stay mounted (just hidden) so switching tabs never loses what you typed. */}
+        <div role="tabpanel" id={`panel-details-${id}`} aria-labelledby={`tab-details-${id}`} hidden={tab !== "details"}>
+          <form action={onSubmit} className="grid gap-4">
+            <input type="hidden" name="project_id" value={id} />
+            <ProjectFields values={values} />
+            <ProjectPeopleFields
+              managers={managers}
+              people={people}
+              defaultManagerId={managerId}
+              defaultAssigneeIds={assigneeIds}
+              showEffective
+            />
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button type="submit" disabled={pending}>
+              {pending ? "Saving…" : "Save changes"}
+            </Button>
+          </form>
+        </div>
+        <div role="tabpanel" id={`panel-history-${id}`} aria-labelledby={`tab-history-${id}`} hidden={tab !== "history"}>
+          <ProjectHistory history={history} />
+        </div>
       </DialogContent>
     </Dialog>
   );

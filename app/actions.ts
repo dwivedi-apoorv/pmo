@@ -54,6 +54,21 @@ function parsePayment(formData: FormData) {
   return { payment_date, payment_term, payment_method, payment_amount_usd: Math.round(amount * 100) / 100 };
 }
 
+/**
+ * Sets the manager and team through the database, which also records who worked on the project and
+ * from when to when. `effective` is the date the change took effect (earlier than today for a handover
+ * that already happened).
+ */
+async function setTeam(projectId: string, managerId: string | null, memberIds: string[], effective: string) {
+  const { error } = await supabaseAdmin.rpc("set_project_team", {
+    p_project: projectId,
+    p_manager: managerId,
+    p_members: memberIds,
+    p_effective: effective,
+  });
+  if (error) throw new Error(error.message);
+}
+
 export async function createProject(formData: FormData) {
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
@@ -77,18 +92,19 @@ export async function createProject(formData: FormData) {
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
-      project_manager_id,
       ...payment,
     })
     .select("id")
     .single();
   if (error) throw new Error(error.message);
 
-  if (assignees.length) {
-    const { error: aErr } = await supabaseAdmin
-      .from("project_assignments")
-      .insert(assignees.map((employee_id) => ({ project_id: data.id, employee_id })));
-    if (aErr) throw new Error(aErr.message);
+  // The team starts working on the project from its onboarding date.
+  try {
+    await setTeam(data.id, project_manager_id, assignees, onboarding_date);
+  } catch (e) {
+    throw new Error(
+      `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
+    );
   }
 
   await runBackfill(data.id, payment, backfillUntil);
@@ -119,42 +135,33 @@ export async function updateProject(formData: FormData) {
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
-      project_manager_id: pmId(formData.get("project_manager_id")),
       ...payment,
     })
     .eq("id", project_id);
   if (error) throw new Error(error.message);
 
-  // Sync assignees: remove the unticked, add the newly ticked.
-  const wanted = new Set(formData.getAll("assignees").map(String).filter(Boolean));
-  const { data: current, error: cErr } = await supabaseAdmin
-    .from("project_assignments")
-    .select("employee_id")
-    .eq("project_id", project_id);
-  if (cErr) throw new Error(cErr.message);
-
-  const have = new Set((current ?? []).map((r) => r.employee_id as string));
-  const toRemove = [...have].filter((id) => !wanted.has(id));
-  const toAdd = [...wanted].filter((id) => !have.has(id));
-
-  if (toRemove.length) {
-    const { error: dErr } = await supabaseAdmin
-      .from("project_assignments")
-      .delete()
-      .eq("project_id", project_id)
-      .in("employee_id", toRemove);
-    if (dErr) throw new Error(dErr.message);
-  }
-  if (toAdd.length) {
-    const { error: iErr } = await supabaseAdmin
-      .from("project_assignments")
-      .insert(toAdd.map((employee_id) => ({ project_id, employee_id })));
-    if (iErr) throw new Error(iErr.message);
-  }
+  // Manager and team: the database closes the stretch of anyone who left and opens one for anyone who
+  // joined, dated `effective_date` (today unless you record an earlier handover).
+  const effective = str(formData.get("effective_date")) || todayISO();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effective)) throw new Error("Enter a valid date for when the change took effect.");
+  if (effective > todayISO()) throw new Error("The change can't take effect in the future.");
+  await setTeam(
+    project_id,
+    pmId(formData.get("project_manager_id")),
+    formData.getAll("assignees").map(String).filter(Boolean),
+    effective
+  );
 
   await runBackfill(project_id, payment, backfillUntil);
   revalidatePath("/payments");
   revalidatePath("/");
+}
+
+/** Reuse an existing role's exact spelling ("project manager" -> "Project Manager"). */
+async function canonicalRole(roleRaw: string) {
+  const { data: existing, error } = await supabaseAdmin.from("employees").select("role");
+  if (error) throw new Error(error.message);
+  return (existing ?? []).map((r) => r.role as string | null).find((r) => r?.toLowerCase() === roleRaw.toLowerCase()) ?? roleRaw;
 }
 
 export async function createEmployee(formData: FormData) {
@@ -165,12 +172,7 @@ export async function createEmployee(formData: FormData) {
   if (!name || !email || !roleRaw) throw new Error("Name, email and role are required.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
 
-  // Reuse an existing role's exact spelling ("project manager" -> "Project Manager")
-  const { data: existing, error: rErr } = await supabaseAdmin.from("employees").select("role");
-  if (rErr) throw new Error(rErr.message);
-  const role =
-    (existing ?? []).map((r) => r.role as string | null).find((r) => r?.toLowerCase() === roleRaw.toLowerCase()) ??
-    roleRaw;
+  const role = await canonicalRole(roleRaw);
 
   const { error } = await supabaseAdmin.from("employees").insert({ name, email, role });
   if (error) {
@@ -179,6 +181,32 @@ export async function createEmployee(formData: FormData) {
   }
 
   revalidatePath("/");
+}
+
+export async function updateEmployee(formData: FormData) {
+  const employee_id = str(formData.get("employee_id"));
+  const name = str(formData.get("name"));
+  const email = str(formData.get("email")).toLowerCase();
+  const roleRaw = str(formData.get("role"));
+
+  if (!employee_id) throw new Error("Missing employee.");
+  if (!name || !email || !roleRaw) throw new Error("Name, email and role are required.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
+
+  const { error } = await supabaseAdmin.rpc("update_employee", {
+    p_employee: employee_id,
+    p_name: name,
+    p_email: email,
+    p_role: await canonicalRole(roleRaw),
+  });
+  if (error) {
+    if (error.code === "23505") throw new Error("Another employee already uses this email.");
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/people");
+  revalidatePath("/projects");
 }
 
 export async function deactivateEmployee(formData: FormData) {
