@@ -170,7 +170,7 @@ export async function createProject(formData: FormData) {
   try {
     await setTeam(data.id, project_manager_id, assignees, onboarding_date);
     const added = newlyAdded({ manager: null, members: new Set() }, project_manager_id, assignees);
-    if (added.length) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
+    if (added.length) after(() => notifyAssigned(data.id, added, me.name)); // after the response, so saving never waits on Teams
   } catch (e) {
     throw new Error(
       `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
@@ -224,7 +224,7 @@ export async function updateProject(formData: FormData) {
   const before = await currentTeam(project_id);
   await setTeam(project_id, newManager, newMembers, effective);
   const added = newlyAdded(before, newManager, newMembers);
-  if (added.length) after(() => notifyAssigned(project_id, added));
+  if (added.length) after(() => notifyAssigned(project_id, added, me.name));
 
   await runBackfill(project_id, payment, backfillUntil);
   revalidatePath("/payments");

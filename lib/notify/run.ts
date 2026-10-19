@@ -79,20 +79,21 @@ export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<Di
 /** "You've been added to X": sent to everyone newly added as manager or team member (including whoever made the change). Never throws (a Teams problem must not break saving). */
 export async function notifyAssigned(
   projectId: string,
-  added: { employeeId: string; role: "Project manager" | "Team member" }[]
+  added: { employeeId: string; role: "Project manager" | "Team member" }[],
+  senderName: string
 ) {
   try {
     if ((await getDisabledKinds()).has("assigned")) return;
     const who = added;
     if (!who.length) return;
-    const [{ data: project }, { data: people }, { data: team }, { data: svc }] = await Promise.all([
+    const [{ data: project }, { data: people }, { data: onboarding }, { data: svc }] = await Promise.all([
       supabaseAdmin
         .from("projects")
-        .select("name, client_name, website, status, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id")
+        .select("name, client_name, website, onboarding_date, project_manager_id")
         .eq("id", projectId)
         .maybeSingle(),
       supabaseAdmin.from("employees").select("id, name, email, is_active").in("id", who.map((w) => w.employeeId)),
-      supabaseAdmin.from("project_assignments").select("employees(name)").eq("project_id", projectId),
+      supabaseAdmin.from("project_notes").select("body").eq("project_id", projectId).eq("kind", "onboarding").maybeSingle(),
       supabaseAdmin.from("project_services").select("services(name)").eq("project_id", projectId),
     ]);
     if (!project) return;
@@ -103,7 +104,7 @@ export async function notifyAssigned(
     const details: AssignedProject = {
       ...(project as any),
       manager: managerName,
-      team: (team ?? []).map((t: any) => one<{ name: string }>(t.employees)?.name).filter((n): n is string => !!n).sort(),
+      onboarding_notes: (onboarding?.body as string | undefined) ?? null,
       services: (svc ?? []).map((t: any) => one<{ name: string }>(t.services)?.name).filter((n): n is string => !!n).sort(),
     };
     const sender = await Sender.open();
@@ -111,7 +112,7 @@ export async function notifyAssigned(
     for (const w of who) {
       const e = people?.find((p) => p.id === w.employeeId);
       if (!e?.is_active || !e.email) continue;
-      const notice: Notice = assignedNotice(details, w.role, appUrl());
+      const notice: Notice = assignedNotice(details, senderName);
       await sender.send({ id: e.id, name: e.name, email: e.email } as Recipient, notice, "assigned");
     }
   } catch (e) {
