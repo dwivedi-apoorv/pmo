@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { supabase } from "@/lib/supabase";
+import { limitTo, requirePageAccess } from "@/lib/access";
 import { COLUMNS, HIDDEN_COLUMNS_COOKIE, parseHidden, type ColumnId } from "@/lib/columns";
 import { loadPeople } from "@/lib/people";
 import { attentionRows, overdueSince, type Due } from "@/lib/dues";
@@ -63,6 +64,10 @@ export default async function ProjectsPage({
 }: {
   searchParams: Promise<{ sort?: string; dir?: string; q?: string; status?: string; risk?: string; service?: string }>;
 }) {
+  const access = await requirePageAccess();
+  const { scope } = access;
+  const canPay = access.can("payments");
+  const canManage = access.can("manage_projects");
   const sp = await searchParams;
   const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "reporting";
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc";
@@ -74,34 +79,25 @@ export default async function ProjectsPage({
   const show = (id: ColumnId) => !hidden.has(id);
 
   const [projectsRes, peopleRes, ledgerRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
-    supabase
-      .from("projects")
-      .select(
-        "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
-      )
-      .order("reporting_date", { ascending: true })
-      .returns<Project[]>(),
+    limitTo(
+      supabase
+        .from("projects")
+        .select(
+          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
+        )
+        .order("reporting_date", { ascending: true }),
+      scope,
+      "id"
+    ).returns<Project[]>(),
     loadPeople(),
-    supabase
-      .from("payment_dues")
-      .select("project_id, due_date, amount_usd, term, method, status, paid_at")
-      .returns<Due[]>(),
-    supabase
-      .from("project_status_log")
-      .select("project_id, status, reason, changed_at")
-      .order("changed_at", { ascending: false })
-      .returns<StatusLogRow[]>(),
-    supabase
-      .from("project_team_history")
-      .select("id, project_id, employee_id, employee_name, role, started_on, ended_on")
-      .returns<TeamPeriod[]>(),
-    supabase.from("report_log").select("project_id, due_date, sent_at").returns<ReportSend[]>(),
+    canPay
+      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
+      : Promise.resolve({ data: [] as Due[], error: null }),
+    limitTo(supabase.from("project_status_log").select("project_id, status, reason, changed_at").order("changed_at", { ascending: false }), scope).returns<StatusLogRow[]>(),
+    limitTo(supabase.from("project_team_history").select("id, project_id, employee_id, employee_name, role, started_on, ended_on"), scope).returns<TeamPeriod[]>(),
+    limitTo(supabase.from("report_log").select("project_id, due_date, sent_at"), scope).returns<ReportSend[]>(),
     supabase.from("services").select("id, name").order("name").returns<Service[]>(),
-    supabase
-      .from("project_notes")
-      .select(NOTE_COLUMNS)
-      .order("created_at", { ascending: false })
-      .returns<ProjectNote[]>(),
+    limitTo(supabase.from("project_notes").select(NOTE_COLUMNS).order("created_at", { ascending: false }), scope).returns<ProjectNote[]>(),
     supabase.from("project_note_versions").select(VERSION_COLUMNS).order("saved_at", { ascending: false }).returns<NoteVersion[]>(),
   ]);
 
@@ -126,7 +122,8 @@ export default async function ProjectsPage({
     : sort === "assigned" ? p.project_assignments.length
     : sort === "payment" ? (nextPaymentDate(p) ?? "9999-12-31") // no upcoming payment sorts last
     : nextReportDate(p.reporting_date);
-  const allProjects = projectsRes.data ?? [];
+  // People who can't see payments never get the payment details: they're blanked here, before anything is shown.
+  const allProjects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
   // At risk: an ACTIVE project with an overdue report or an overdue payment.
   const activeProjects = allProjects.filter((p) => p.status === "active");
   const risk = riskByProject(
@@ -187,7 +184,7 @@ export default async function ProjectsPage({
       <PageHeader
         title="Projects"
         description="Projects, their teams, reports and payments"
-        action={<NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} />}
+        action={canManage ? <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} /> : undefined}
       />
 
       <div className="flex flex-wrap items-center gap-3">
@@ -253,7 +250,7 @@ export default async function ProjectsPage({
                 {show("website") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="website">Website</SortHead>}
                 {show("onboarded") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="onboarded">Onboarded</SortHead>}
                 {show("reporting") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="reporting">Next report</SortHead>}
-                {show("payment") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="payment">Next payment</SortHead>}
+                {show("payment") && canPay && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="payment">Next payment</SortHead>}
                 {show("manager") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="manager">Project manager</SortHead>}
                 {show("assigned") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="assigned">Assigned to</SortHead>}
                 {show("notes") && <TableHead className="sticky right-24 z-[1] border-l bg-card">Notes</TableHead>}
@@ -324,7 +321,7 @@ export default async function ProjectsPage({
                         {p.status === "active" ? nextReportDate(p.reporting_date) : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                     )}
-                    {show("payment") && (
+                    {show("payment") && canPay && (
                       <TableCell className="whitespace-nowrap">
                         {(() => {
                           // Upcoming payments only matter while a project is active, but money still
@@ -374,7 +371,8 @@ export default async function ProjectsPage({
                     )}
                     <TableCell className="sticky right-0 z-[1] w-24 min-w-24 border-l bg-card text-right">
                       <div className="flex items-center justify-end gap-1">
-                      <EditProjectDialog
+                      {canManage && <EditProjectDialog
+                        showPayment={canPay}
                         id={p.id}
                         values={{
                           name: p.name,
@@ -396,8 +394,8 @@ export default async function ProjectsPage({
                         serviceIds={servicesOf(p).map((x) => x.id)}
                         notes={(notesRes.data ?? []).filter((n) => n.project_id === p.id)}
                         noteVersions={versionsFor(p.id)}
-                      />
-                      <ProjectStatusMenu id={p.id} name={p.name} status={p.status} />
+                      />}
+                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} />}
                       </div>
                     </TableCell>
                   </TableRow>

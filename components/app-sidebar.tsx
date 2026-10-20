@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -28,7 +28,7 @@ const PAGES = [
   { title: "Employees", href: "/people", icon: UsersIcon },
 ];
 
-export function AppSidebar({ user, admin = false }: { user: { name: string; email: string }; admin?: boolean }) {
+export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name: string; email: string }; admin?: boolean; hidden?: string[] }) {
   const pathname = usePathname();
 
   return (
@@ -43,7 +43,7 @@ export function AppSidebar({ user, admin = false }: { user: { name: string; emai
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {[...PAGES, ...(admin ? [{ title: "Settings", href: "/settings", icon: SettingsIcon }] : [])].map((item) => {
+              {[...PAGES.filter((p) => !hidden.includes(p.href)), ...(admin ? [{ title: "Access", href: "/access", icon: ShieldCheckIcon }, { title: "Settings", href: "/settings", icon: SettingsIcon }] : [])].map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 return (
                   <SidebarMenuItem key={item.href}>

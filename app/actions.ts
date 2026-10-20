@@ -2,14 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { notifyAssigned } from "@/lib/notify/run";
+import { notifyAssigned, notifyTeamChanged } from "@/lib/notify/run";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isPaymentMethod, isPaymentTerm, projectionMonths } from "@/lib/payments";
 import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
 import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
-import { requireEmployee } from "@/lib/auth";
+import { requirePermission, requireProject, type Access } from "@/lib/access";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
 // "" and "none" (the select's "— None —" option) both mean no project manager
@@ -31,8 +31,8 @@ function parseBackfill(formData: FormData, firstPaymentDate: string) {
   return until;
 }
 
-async function runBackfill(projectId: string, payment: ReturnType<typeof parsePayment>, until: string | null) {
-  if (!until) return;
+async function runBackfill(projectId: string, payment: ReturnType<typeof parsePayment> | null, until: string | null) {
+  if (!until || !payment) return;
   try {
     await backfillPaidPayments(projectId, payment, until);
   } catch (e) {
@@ -115,7 +115,8 @@ async function setTeam(projectId: string, managerId: string | null, memberIds: s
 }
 
 export async function createProject(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_projects");
+  const me = access.user;
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
   const websiteRaw = str(formData.get("website"));
@@ -127,8 +128,9 @@ export async function createProject(formData: FormData) {
   if (!name || !client_name || !websiteRaw || !onboarding_date || !reporting_date) {
     throw new Error("Name, client, website, onboarding date and reporting date are required.");
   }
-  const payment = parsePayment(formData);
-  const backfillUntil = parseBackfill(formData, payment.payment_date);
+  // Payment details are only read from people who may see payments; for anyone else the project starts without a plan.
+  const payment = access.can("payments") ? parsePayment(formData) : null;
+  const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
   const { data, error } = await supabaseAdmin
@@ -139,7 +141,7 @@ export async function createProject(formData: FormData) {
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
-      ...payment,
+      ...(payment ?? {}),
     })
     .select("id")
     .single();
@@ -170,7 +172,7 @@ export async function createProject(formData: FormData) {
   try {
     await setTeam(data.id, project_manager_id, assignees, onboarding_date);
     const added = newlyAdded({ manager: null, members: new Set() }, project_manager_id, assignees);
-    if (added.length) after(() => notifyAssigned(data.id, added, me.name)); // after the response, so saving never waits on Teams
+    if (added.length) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
   } catch (e) {
     throw new Error(
       `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
@@ -184,8 +186,10 @@ export async function createProject(formData: FormData) {
 }
 
 export async function updateProject(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_projects");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
   const websiteRaw = str(formData.get("website"));
@@ -195,8 +199,9 @@ export async function updateProject(formData: FormData) {
   if (!project_id || !name || !client_name || !websiteRaw || !onboarding_date || !reporting_date) {
     throw new Error("Name, client, website, onboarding date and reporting date are required.");
   }
-  const payment = parsePayment(formData);
-  const backfillUntil = parseBackfill(formData, payment.payment_date);
+  // Payment details are left as they are unless this person may see payments.
+  const payment = access.can("payments") ? parsePayment(formData) : null;
+  const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
   const { error } = await supabaseAdmin
@@ -207,7 +212,7 @@ export async function updateProject(formData: FormData) {
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
-      ...payment,
+      ...(payment ?? {}),
     })
     .eq("id", project_id);
   if (error) throw new Error(error.message);
@@ -224,7 +229,8 @@ export async function updateProject(formData: FormData) {
   const before = await currentTeam(project_id);
   await setTeam(project_id, newManager, newMembers, effective);
   const added = newlyAdded(before, newManager, newMembers);
-  if (added.length) after(() => notifyAssigned(project_id, added, me.name));
+  if (added.length) after(() => notifyAssigned(project_id, added));
+  after(() => notifyTeamChanged(project_id, before, newManager, newMembers, added.map((a) => a.employeeId)));
 
   await runBackfill(project_id, payment, backfillUntil);
   revalidatePath("/payments");
@@ -239,7 +245,8 @@ async function canonicalRole(roleRaw: string) {
 }
 
 export async function createEmployee(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_people");
+  const me = access.user;
   const name = str(formData.get("name"));
   const email = str(formData.get("email")).toLowerCase();
   const roleRaw = str(formData.get("role"));
@@ -259,7 +266,8 @@ export async function createEmployee(formData: FormData) {
 }
 
 export async function updateEmployee(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_people");
+  const me = access.user;
   const employee_id = str(formData.get("employee_id"));
   const name = str(formData.get("name"));
   const email = str(formData.get("email")).toLowerCase();
@@ -286,7 +294,8 @@ export async function updateEmployee(formData: FormData) {
 }
 
 export async function deactivateEmployee(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_people");
+  const me = access.user;
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -302,7 +311,8 @@ export async function deactivateEmployee(formData: FormData) {
 }
 
 export async function reactivateEmployee(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_people");
+  const me = access.user;
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -314,7 +324,8 @@ export async function reactivateEmployee(formData: FormData) {
 }
 
 export async function deleteEmployee(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_people");
+  const me = access.user;
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
@@ -338,8 +349,10 @@ export async function deleteEmployee(formData: FormData) {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function markPaid(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("payments");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const due_date = str(formData.get("due_date"));
   if (!project_id || !DATE_RE.test(due_date)) throw new Error("Missing project or due date.");
 
@@ -390,8 +403,10 @@ export async function markPaid(formData: FormData) {
 
 /** Puts a paid payment back to unpaid. The row stays; nothing is deleted. */
 export async function undoPaid(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("payments");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const due_date = str(formData.get("due_date"));
   if (!project_id || !DATE_RE.test(due_date)) return;
 
@@ -408,7 +423,7 @@ export async function undoPaid(formData: FormData) {
 
 /** Runs the monthly job for the current month on demand (same code the scheduled job runs). */
 export async function openDuesNow(): Promise<{ ok: boolean; message: string }> {
-  await requireEmployee(); // nobody signed in, nothing happens
+  await requirePermission("payments");
   try {
     const month = projectionMonths(todayISO(), 1)[0];
     const r = await openDuesForMonth(month);
@@ -427,8 +442,10 @@ export async function openDuesNow(): Promise<{ ok: boolean; message: string }> {
 }
 
 export async function changeProjectStatus(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("manage_projects");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const status = str(formData.get("status"));
   const reason = str(formData.get("reason"));
 
@@ -450,8 +467,10 @@ export async function changeProjectStatus(formData: FormData) {
 
 /** Records that a project's report for `due_date` has been sent. */
 export async function markReportSent(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("reports");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const due_date = str(formData.get("due_date"));
   if (!project_id || !/^\d{4}-\d{2}-\d{2}$/.test(due_date)) throw new Error("Missing project or report date.");
 
@@ -467,8 +486,10 @@ export async function markReportSent(formData: FormData) {
 
 /** Puts a report back to "not sent". The row is removed, nothing else changes. */
 export async function undoReportSent(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("reports");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const due_date = str(formData.get("due_date"));
   if (!project_id || !/^\d{4}-\d{2}-\d{2}$/.test(due_date)) return;
 
@@ -480,6 +501,12 @@ export async function undoReportSent(formData: FormData) {
   revalidatePath("/projects");
 }
 
+/** A note can only be changed by someone who can see the project it belongs to. */
+async function requireNoteAccess(access: Access, noteId: string) {
+  const { data } = await supabaseAdmin.from("project_notes").select("project_id").eq("id", noteId).maybeSingle();
+  if (data) requireProject(access, data.project_id as string);
+}
+
 function refreshNotes() {
   revalidatePath("/projects");
   revalidatePath("/onboarding");
@@ -487,8 +514,10 @@ function refreshNotes() {
 
 /** Adds a note. The database refuses a second onboarding note for a project and requires an author. */
 export async function addNote(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("edit_notes");
+  const me = access.user;
   const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
   const kind = str(formData.get("kind")) || "general";
   if (!project_id) throw new Error("Missing project.");
   if (!isNoteKind(kind)) throw new Error("Choose a type for the note.");
@@ -505,9 +534,11 @@ export async function addNote(formData: FormData) {
 
 /** Edits a note's text. The database keeps the previous version and records who edited. */
 export async function updateNote(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("edit_notes");
+  const me = access.user;
   const id = str(formData.get("id"));
   if (!id) throw new Error("Missing note.");
+  await requireNoteAccess(access, id);
 
   const { error } = await supabaseAdmin.rpc("edit_project_note", {
     p_note: id,
@@ -520,9 +551,11 @@ export async function updateNote(formData: FormData) {
 
 /** Deletes a note, except onboarding notes: those can be edited but never removed. */
 export async function deleteNote(formData: FormData) {
-  const me = await requireEmployee(); // nobody signed in, nothing happens
+  const access = await requirePermission("edit_notes");
+  const me = access.user;
   const id = str(formData.get("id"));
   if (!id) return;
+  await requireNoteAccess(access, id);
 
   const { data, error: gErr } = await supabaseAdmin.from("project_notes").select("kind").eq("id", id).maybeSingle();
   if (gErr) throw new Error(gErr.message);

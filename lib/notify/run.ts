@@ -6,7 +6,7 @@ import type { Due } from "@/lib/dues";
 import type { ReportSend } from "@/lib/reports";
 import { buildDigests, type DigestEmployee, type DigestProject } from "@/lib/notify/digest";
 import type { Notice } from "@/lib/notify/notice";
-import { assignedNotice, type AssignedProject } from "@/lib/notify/project";
+import { assignedNotice, teamChangedNotice, type AssignedProject } from "@/lib/notify/project";
 import { Sender, getDisabledKinds, type Recipient } from "@/lib/notify/send";
 
 export type DigestRun = { method: string; people: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
@@ -79,8 +79,7 @@ export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<Di
 /** "You've been added to X": sent to everyone newly added as manager or team member (including whoever made the change). Never throws (a Teams problem must not break saving). */
 export async function notifyAssigned(
   projectId: string,
-  added: { employeeId: string; role: "Project manager" | "Team member" }[],
-  senderName: string
+  added: { employeeId: string; role: "Project manager" | "Team member" }[]
 ) {
   try {
     if ((await getDisabledKinds()).has("assigned")) return;
@@ -112,10 +111,58 @@ export async function notifyAssigned(
     for (const w of who) {
       const e = people?.find((p) => p.id === w.employeeId);
       if (!e?.is_active || !e.email) continue;
-      const notice: Notice = assignedNotice(details, senderName);
+      const notice: Notice = assignedNotice(details);
       await sender.send({ id: e.id, name: e.name, email: e.email } as Recipient, notice, "assigned");
     }
   } catch (e) {
     console.error("[notify] could not send assignment notices:", e instanceof Error ? e.message : e);
+  }
+}
+
+/**
+ * "The team on X changed": sent to everyone on the project now who isn't getting the "added to a project"
+ * welcome (new people get that instead). Does nothing if neither the manager nor the team changed.
+ */
+export async function notifyTeamChanged(
+  projectId: string,
+  before: { manager: string | null; members: Set<string> },
+  manager: string | null,
+  members: string[],
+  welcomed: string[]
+) {
+  try {
+    const now = new Set(members);
+    const added = members.filter((m) => !before.members.has(m) && m !== manager);
+    const removed = [...before.members].filter((m) => !now.has(m) && m !== manager);
+    if (manager === before.manager && !added.length && !removed.length) return;
+    if ((await getDisabledKinds()).has("team_changed")) return;
+
+    const ids = [...new Set([manager, before.manager, ...members, ...before.members].filter((x): x is string => !!x))];
+    const [{ data: project }, { data: people }] = await Promise.all([
+      supabaseAdmin.from("projects").select("name").eq("id", projectId).maybeSingle(),
+      supabaseAdmin.from("employees").select("id, name, email, is_active").in("id", ids),
+    ]);
+    if (!project) return;
+    const name = (id: string | null) => (id ? people?.find((p) => p.id === id)?.name ?? null : null);
+    const names = (xs: string[]) => xs.map(name).filter((n): n is string => !!n).sort();
+    const notice = teamChangedNotice({
+      project: project.name,
+      oldManager: name(before.manager),
+      newManager: name(manager),
+      added: names(added),
+      removed: names(removed),
+      team: names(members.filter((m) => m !== manager)),
+    });
+
+    const sender = await Sender.open();
+    if (sender.method === "off") return;
+    const recipients = new Set([manager, ...members].filter((x): x is string => !!x && !welcomed.includes(x)));
+    for (const id of recipients) {
+      const e = people?.find((p) => p.id === id);
+      if (!e?.is_active || !e.email) continue;
+      await sender.send({ id: e.id, name: e.name, email: e.email } as Recipient, notice, "assigned");
+    }
+  } catch (e) {
+    console.error("[notify] could not send team-change notices:", e instanceof Error ? e.message : e);
   }
 }

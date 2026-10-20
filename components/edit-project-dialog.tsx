@@ -34,6 +34,7 @@ export function EditProjectDialog({
   serviceIds,
   notes,
   noteVersions,
+  showPayment = true,
 }: {
   id: string;
   values: ProjectValues;
@@ -46,6 +47,7 @@ export function EditProjectDialog({
   serviceIds: string[];
   notes: ProjectNote[];
   noteVersions: NoteVersion[];
+  showPayment?: boolean;
 }) {
   const [tab, setTab] = useState<"details" | "history" | "notes">("details");
   const [open, setOpen] = useState(false);
@@ -108,7 +110,7 @@ export function EditProjectDialog({
         <div role="tabpanel" id={`panel-details-${id}`} aria-labelledby={`tab-details-${id}`} hidden={tab !== "details"}>
           <form action={onSubmit} className="grid gap-4">
             <input type="hidden" name="project_id" value={id} />
-            <ProjectFields values={values} />
+            <ProjectFields values={values} showPayment={showPayment} />
             <ServicePicker services={services} defaultSelected={serviceIds} />
             <ProjectPeopleFields
               managers={managers}

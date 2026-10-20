@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { limitTo } from "@/lib/access";
 import type { PaymentPlan } from "@/lib/payments";
 import type { Due } from "@/lib/dues";
 import type { ProjectStatus } from "@/lib/status";
@@ -7,19 +8,22 @@ export type ProjectInfo = { name: string; client: string; status: ProjectStatus;
 export type PlanRow = { id: string; name: string; client_name: string; status: ProjectStatus; project_manager_id: string | null } & PaymentPlan;
 
 // Everything the payment views need, in two queries: every project (any status) and the ledger.
-export async function loadPaymentsData() {
+// `scope` limits it to the projects a person may see (null = all); `money: false` leaves out every amount and the ledger.
+export async function loadPaymentsData(opts: { scope?: string[] | null; money?: boolean } = {}) {
+  const scope = opts.scope ?? null;
+  const money = opts.money ?? true;
   const [projectsRes, ledgerRes] = await Promise.all([
-    supabase
-      .from("projects")
-      .select("id, name, client_name, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd")
-      .returns<PlanRow[]>(),
-    supabase
-      .from("payment_dues")
-      .select("project_id, due_date, amount_usd, term, method, status, paid_at")
-      .returns<Due[]>(),
+    limitTo(
+      supabase.from("projects").select("id, name, client_name, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd"),
+      scope,
+      "id"
+    ).returns<PlanRow[]>(),
+    money
+      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
+      : Promise.resolve({ data: [] as Due[], error: null }),
   ]);
 
-  const all = projectsRes.data ?? [];
+  const all = (projectsRes.data ?? []).map((p) => (money ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
   const info = new Map<string, ProjectInfo>(
     all.map((p) => [p.id, { name: p.name, client: p.client_name, status: p.status, managerId: p.project_manager_id }])
   );

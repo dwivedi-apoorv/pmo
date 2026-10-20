@@ -1,16 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getCurrentEmployee } from "@/lib/auth";
-import { isAdmin } from "@/lib/ms/config";
+import { requireAdmin } from "@/lib/access";
 import { NOTIFICATION_KINDS, Sender, getMethod, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-
-async function requireAdmin() {
-  const me = await getCurrentEmployee();
-  if (!me || !isAdmin(me.email)) throw new Error("Only admins can change these settings.");
-  return me;
-}
 
 export async function saveMethod(formData: FormData) {
   await requireAdmin();
@@ -50,7 +43,7 @@ export async function installBotForEveryone(): Promise<{ name: string; ok: boole
 
 /** Sends a test message to the admin who clicked, using the method that is switched on. */
 export async function sendTestMessage(toEmail?: string): Promise<Delivery & { method?: "user" | "bot" }> {
-  const me = await requireAdmin();
+  const me = (await requireAdmin()).user;
   let to = { id: me.id, name: me.name, email: me.email };
   const wanted = (toEmail ?? "").trim();
   if (wanted && wanted.toLowerCase() !== me.email.toLowerCase()) {

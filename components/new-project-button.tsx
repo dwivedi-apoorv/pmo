@@ -11,10 +11,12 @@ export function NewProjectButton({
   employees,
   managers,
   services,
+  showPayment = true,
 }: {
   employees: EmployeeOption[];
   managers: EmployeeOption[];
   services: Service[];
+  showPayment?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -22,7 +24,7 @@ export function NewProjectButton({
       <Button onClick={() => setOpen(true)}>
         <PlusIcon /> New project
       </Button>
-      <NewProjectDialog employees={employees} managers={managers} services={services} open={open} onOpenChange={setOpen} />
+      <NewProjectDialog employees={employees} managers={managers} services={services} showPayment={showPayment} open={open} onOpenChange={setOpen} />
     </>
   );
 }

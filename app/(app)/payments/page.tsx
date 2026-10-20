@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { loadPeople } from "@/lib/people";
 import { loadPaymentsData } from "@/lib/payments-data";
+import { requirePagePermission } from "@/lib/access";
 import { attentionRows, monthItems } from "@/lib/dues";
 import { formatUSD, projectionMonths } from "@/lib/payments";
 import { todayISO } from "@/lib/reporting";
@@ -23,6 +24,7 @@ const shiftMonth = (key: string, delta: number) => {
 };
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+  const { scope } = await requirePagePermission("payments");
   const sp = await searchParams;
   const today = todayISO();
   const currentKey = today.slice(0, 7);
@@ -31,7 +33,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const month = projectionMonths(`${requested}-01`, 1)[0];
   const isCurrent = month.key === currentKey;
 
-  const [data, peopleRes] = await Promise.all([loadPaymentsData(), loadPeople()]);
+  const [data, peopleRes] = await Promise.all([loadPaymentsData({ scope }), loadPeople()]);
   const error = data.error ?? peopleRes.error;
   if (error) {
     return (

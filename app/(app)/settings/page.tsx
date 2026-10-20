@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { requirePageUser } from "@/lib/auth";
-import { appUrl, botConfigured, isAdmin, userAppConfigured } from "@/lib/ms/config";
+import { requirePageAdmin } from "@/lib/access";
+import { appUrl, botConfigured, userAppConfigured } from "@/lib/ms/config";
 import { NOTIFICATION_KINDS, getConnection, getDisabledKinds, getMethod } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { noteDateTime } from "@/lib/notes";
@@ -27,8 +27,7 @@ const Check = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => 
 );
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ connected?: string; error?: string }> }) {
-  const me = await requirePageUser();
-  if (!isAdmin(me.email)) redirect("/");
+  await requirePageAdmin();
   const sp = await searchParams;
 
   const [method, off, connection, botChats, people, log] = await Promise.all([

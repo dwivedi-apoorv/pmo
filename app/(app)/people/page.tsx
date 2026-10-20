@@ -1,3 +1,4 @@
+import { limitTo, requirePageAccess } from "@/lib/access";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { isProjectManager, loadPeople } from "@/lib/people";
@@ -33,6 +34,8 @@ export default async function PeoplePage({
 }: {
   searchParams: Promise<{ sort?: string; dir?: string; q?: string }>;
 }) {
+  const access = await requirePageAccess();
+  const canManage = access.can("manage_people");
   const sp = await searchParams;
   const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "status";
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc";
@@ -40,10 +43,7 @@ export default async function PeoplePage({
 
   const [peopleRes, projectsRes] = await Promise.all([
     loadPeople(),
-    supabase
-      .from("projects")
-      .select("id, name, status, project_manager_id, project_assignments(employee_id)")
-      .returns<ProjectRow[]>(),
+    limitTo(supabase.from("projects").select("id, name, status, project_manager_id, project_assignments(employee_id)"), access.scope, "id").returns<ProjectRow[]>(),
   ]);
 
   const error = peopleRes.error ?? projectsRes.error;
@@ -97,7 +97,7 @@ export default async function PeoplePage({
       <PageHeader
         title="Employees"
         description="Add, deactivate or remove people"
-        action={<NewEmployeeButton roles={roles} />}
+        action={canManage ? <NewEmployeeButton roles={roles} /> : undefined}
       />
 
       <Card>
@@ -151,7 +151,7 @@ export default async function PeoplePage({
                       {managedOpen.length} managing · {assignedOpen.length} assigned
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center justify-end gap-2">
+                      {canManage && <div className="flex items-center justify-end gap-2">
                         <EditEmployeeDialog employee={{ id: e.id, name: e.name, email: e.email, role: e.role }} roles={roles} />
                         {e.is_active ? (
                           <DeactivateEmployeeDialog
@@ -180,7 +180,7 @@ export default async function PeoplePage({
                             />
                           </>
                         )}
-                      </div>
+                      </div>}
                     </TableCell>
                   </TableRow>
                 );

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import { limitTo, requirePageAccess } from "@/lib/access";
 import { loadPeople } from "@/lib/people";
 import { addDays, todayISO } from "@/lib/reporting";
 import { formatUSD, projectionMonths, type PaymentPlan } from "@/lib/payments";
@@ -33,34 +34,38 @@ type Project = {
   WithServices;
 
 export default async function Home() {
+  const access = await requirePageAccess();
+  const { scope } = access;
+  const canPay = access.can("payments");
   const month = projectionMonths(todayISO(), 1)[0];
   const [projectsRes, peopleRes, payments, onboardedRes, changesRes, sendsRes, tagsRes, servicesRes] = await Promise.all([
-    supabase
-      .from("projects")
-      .select(
-        "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
-      )
-      .eq("status", "active")
-      .order("reporting_date", { ascending: true })
-      .returns<Project[]>(),
+    limitTo(
+      supabase
+        .from("projects")
+        .select(
+          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
+        )
+        .eq("status", "active")
+        .order("reporting_date", { ascending: true }),
+      scope,
+      "id"
+    ).returns<Project[]>(),
     loadPeople(),
-    loadPaymentsData(),
+    loadPaymentsData({ scope, money: canPay }),
     // Projects onboarded this month, whatever their status now.
-    supabase
-      .from("projects")
-      .select("id", { count: "exact", head: true })
-      .gte("onboarding_date", month.start)
-      .lte("onboarding_date", month.end),
+    limitTo(supabase.from("projects").select("id", { count: "exact", head: true }).gte("onboarding_date", month.start).lte("onboarding_date", month.end), scope, "id"),
     // Status changes made this month (India time): how many projects were halted or lost (ended).
-    supabase
-      .from("project_status_log")
-      .select("status")
-      .gte("changed_at", `${month.start}T00:00:00+05:30`)
-      .lt("changed_at", `${addDays(month.end, 1)}T00:00:00+05:30`)
-      .returns<{ status: string }[]>(),
-    supabase.from("report_log").select("project_id, due_date, sent_at").returns<ReportSend[]>(),
+    limitTo(
+      supabase
+        .from("project_status_log")
+        .select("status, project_id")
+        .gte("changed_at", `${month.start}T00:00:00+05:30`)
+        .lt("changed_at", `${addDays(month.end, 1)}T00:00:00+05:30`),
+      scope
+    ).returns<{ status: string }[]>(),
+    limitTo(supabase.from("report_log").select("project_id, due_date, sent_at"), scope).returns<ReportSend[]>(),
     // Every project's services (including halted and ended ones, whose already-received payments still count).
-    supabase.from("project_services").select("project_id, services(id, name)").returns<{ project_id: string; services: Service | null }[]>(),
+    limitTo(supabase.from("project_services").select("project_id, services(id, name)"), scope).returns<{ project_id: string; services: Service | null }[]>(),
     supabase.from("services").select("id, name").order("name").returns<Service[]>(),
   ]);
 
@@ -75,7 +80,7 @@ export default async function Home() {
   }
 
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
-  const projects = projectsRes.data ?? [];
+  const projects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
   const today = todayISO();
   const managerName = (id: string | null | undefined) => (id ? everyoneById.get(id)?.name : undefined);
 
@@ -202,7 +207,7 @@ export default async function Home() {
                 At risk
                 <span className="ml-2 text-sm font-normal text-muted-foreground">{atRisk.length}</span>
               </CardTitle>
-              <CardDescription>Active projects with an overdue report or an overdue payment.</CardDescription>
+              <CardDescription>{canPay ? "Active projects with an overdue report or an overdue payment." : "Active projects with an overdue report."}</CardDescription>
             </div>
             {atRisk.length > 0 && (
               <Link href="/projects?risk=1" className="text-sm font-medium underline-offset-4 hover:underline">
@@ -318,7 +323,7 @@ export default async function Home() {
           </CardContent>
         </Card>
 
-        <Card>
+        {canPay && <Card>
           <CardHeader>
             <CardTitle>
               Payments
@@ -341,7 +346,7 @@ export default async function Home() {
               {attention.length > SHOWN ? `View all ${attention.length} payments →` : "Open payments →"}
             </Link>
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -375,7 +380,7 @@ export default async function Home() {
             </dl>
           </CardContent>
         </Card>
-        <Card>
+        {canPay && <Card>
           <CardHeader>
             <CardTitle>
               Revenue this month
@@ -389,7 +394,7 @@ export default async function Home() {
               See every payment and past months →
             </Link>
           </CardContent>
-        </Card>
+        </Card>}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

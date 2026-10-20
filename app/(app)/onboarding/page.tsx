@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { limitTo, requirePageAccess } from "@/lib/access";
 import { loadPeople } from "@/lib/people";
 import { todayISO } from "@/lib/reporting";
 import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
@@ -30,22 +31,21 @@ const monthName = (key: string) =>
   });
 
 export default async function OnboardingPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const { scope } = await requirePageAccess();
   const q = ((await searchParams).q ?? "").trim();
 
   const [projectsRes, peopleRes, notesRes] = await Promise.all([
     // Every project, whatever its status: onboarding history never shrinks when a project stops.
-    supabase
-      .from("projects")
-      .select("id, name, client_name, website, onboarding_date, status, project_manager_id, project_services(services(id, name))")
-      .order("onboarding_date", { ascending: false })
-      .returns<Row[]>(),
+    limitTo(
+      supabase
+        .from("projects")
+        .select("id, name, client_name, website, onboarding_date, status, project_manager_id, project_services(services(id, name))")
+        .order("onboarding_date", { ascending: false }),
+      scope,
+      "id"
+    ).returns<Row[]>(),
     loadPeople(),
-    supabase
-      .from("project_notes")
-      .select(NOTE_COLUMNS)
-      .eq("kind", "onboarding")
-      .order("created_at", { ascending: true })
-      .returns<ProjectNote[]>(),
+    limitTo(supabase.from("project_notes").select(NOTE_COLUMNS).eq("kind", "onboarding").order("created_at", { ascending: true }), scope).returns<ProjectNote[]>(),
   ]);
 
   const error = projectsRes.error ?? peopleRes.error ?? notesRes.error;

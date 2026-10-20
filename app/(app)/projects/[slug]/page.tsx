@@ -1,3 +1,4 @@
+import { requirePageAccess } from "@/lib/access";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
@@ -29,6 +30,7 @@ type Project = {
 
 
 export default async function TeamMemberPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { scope } = await requirePageAccess();
   const { slug } = await params;
 
   const peopleRes = await loadPeople();
@@ -59,7 +61,8 @@ export default async function TeamMemberPage({ params }: { params: Promise<{ slu
     )
     .or(filter)
     .order("reporting_date", { ascending: true })
-    .returns<Project[]>();
+    .returns<Project[]>()
+    .then((r) => (scope ? { ...r, data: (r.data ?? []).filter((p) => scope.includes(p.id)) } : r));
 
   if (projectsRes.error) {
     return (

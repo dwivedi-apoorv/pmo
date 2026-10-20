@@ -24,13 +24,12 @@ export function appUrl(): string {
 }
 
 /**
- * Who may open Settings and connect Microsoft accounts: the emails listed in ADMIN_EMAILS (comma
- * separated). On your own computer, with nothing listed, everyone counts as an admin.
+ * Emails listed in ADMIN_EMAILS (comma separated) are always admins, whatever the database says: a safety
+ * net so nobody can lock themselves out. Day-to-day, roles are set on the Access page.
  */
-export function isAdmin(email: string | null | undefined): boolean {
+export function isBootstrapAdmin(email: string | null | undefined): boolean {
   if (!email) return false;
   const admins = (env("ADMIN_EMAILS") ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (admins.length === 0) return process.env.NODE_ENV !== "production";
   return admins.includes(email.toLowerCase());
 }
 

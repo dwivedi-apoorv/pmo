@@ -33,6 +33,7 @@ export const NOTIFICATION_KINDS = [
   { key: "reports", title: "Reports due", text: "In the daily summary: reports that are due soon or overdue. Goes to the project's manager and its team." },
   { key: "payments", title: "Payments due", text: "In the daily summary: payments that are due soon or overdue. Goes to the project's manager." },
   { key: "assigned", title: "Added to a project", text: "Sent straight away when someone is made manager or team member of a project." },
+  { key: "team_changed", title: "Team or manager changed", text: "Sent to everyone already on a project when its manager or team changes, saying who was added or removed." },
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]["key"];
 

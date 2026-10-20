@@ -20,7 +20,7 @@ export type ProjectValues = {
 // Shared by the create and edit dialogs so the two never drift apart.
 // Creating (no `values`): dates are pre-filled. Onboarding and reporting start as today, and the
 // first payment date follows the onboarding date until you pick a payment date yourself.
-export function ProjectFields({ values }: { values?: ProjectValues }) {
+export function ProjectFields({ values, showPayment = true }: { values?: ProjectValues; showPayment?: boolean }) {
   const isNew = !values;
   const today = todayISO();
 
@@ -89,6 +89,7 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
         Reports repeat monthly on the day of the reporting date, e.g. the 16th of every month.
       </p>
 
+      {showPayment && (
       <div className="grid gap-3 border-t pt-4">
         <p className="text-sm font-medium">Payment</p>
         <div className="grid gap-3 sm:grid-cols-4">
@@ -194,6 +195,7 @@ export function ProjectFields({ values }: { values?: ProjectValues }) {
           </div>
         )}
       </div>
+      )}
     </>
   );
 }

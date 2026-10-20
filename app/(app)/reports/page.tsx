@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { limitTo, requirePagePermission } from "@/lib/access";
 import { loadPeople } from "@/lib/people";
 import { nextReportDate, todayISO, daysUntil } from "@/lib/reporting";
 import { overdueReportDate, reportAttention, sentKeys, type ReportProject, type ReportSend } from "@/lib/reports";
@@ -22,14 +23,18 @@ type Row = ReportProject & {
 const ordinal = (n: number) => `${n}${["th", "st", "nd", "rd"][(n % 100 >> 3) ^ 1 && n % 10 < 4 ? n % 10 : 0]}`;
 
 export default async function ReportsPage() {
+  const { scope } = await requirePagePermission("reports");
   const [projectsRes, sendsRes, peopleRes] = await Promise.all([
-    supabase
-      .from("projects")
-      .select("id, name, client_name, reporting_date, created_at, project_manager_id, project_assignments(employees(id, name))")
-      .eq("status", "active")
-      .order("name")
-      .returns<Row[]>(),
-    supabase.from("report_log").select("project_id, due_date, sent_at").order("sent_at", { ascending: false }).returns<ReportSend[]>(),
+    limitTo(
+      supabase
+        .from("projects")
+        .select("id, name, client_name, reporting_date, created_at, project_manager_id, project_assignments(employees(id, name))")
+        .eq("status", "active")
+        .order("name"),
+      scope,
+      "id"
+    ).returns<Row[]>(),
+    limitTo(supabase.from("report_log").select("project_id, due_date, sent_at").order("sent_at", { ascending: false }), scope).returns<ReportSend[]>(),
     loadPeople(),
   ]);
 

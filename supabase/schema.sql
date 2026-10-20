@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 020) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 022) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -782,3 +782,18 @@ where p.status <> 'ended'
     select 1 from project_team_history h
     where h.project_id = pa.project_id and h.employee_id = pa.employee_id and h.role = 'member' and h.ended_on is null
   );
+
+-- ---- Role-based access (migration-022) ----
+alter table employees add column if not exists access_role text not null default 'member'
+  check (access_role in ('admin', 'manager', 'member'));
+
+create table if not exists role_permissions (
+  role       text not null check (role in ('manager', 'member')),
+  permission text not null,
+  allowed    boolean not null,
+  primary key (role, permission)
+);
+alter table role_permissions enable row level security;
+
+update employees set access_role = 'manager' where access_role = 'member' and lower(btrim(role)) = 'project manager';
+update employees set access_role = 'admin' where lower(email) = 'apoorv.dwivedi@digirockettechnologies.com';

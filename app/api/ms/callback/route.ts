@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getCurrentEmployee } from "@/lib/auth";
+import { getAccess } from "@/lib/access";
 import { encryptSecret } from "@/lib/crypto";
-import { appUrl, isAdmin } from "@/lib/ms/config";
+import { appUrl } from "@/lib/ms/config";
 import { OAUTH_COOKIE, readOauthState } from "@/lib/ms/state";
 import { exchangeCode, getMe } from "@/lib/ms/user";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
     res.cookies.delete({ name: OAUTH_COOKIE, path: "/api/ms" });
     return res;
   };
-  const me = await getCurrentEmployee();
-  if (!me || !isAdmin(me.email)) return new NextResponse("Only admins can connect a Microsoft account.", { status: 403 });
+  const me = await getAccess();
+  if (me?.role !== "admin") return new NextResponse("Only admins can connect a Microsoft account.", { status: 403 });
 
   const url = req.nextUrl.searchParams;
   if (url.get("error")) return back(`error=${encodeURIComponent(url.get("error_description") ?? url.get("error")!)}`);
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
     status: "ok",
     last_error: null,
     last_error_at: null,
-    connected_by: me.id,
+    connected_by: me.user.id,
     connected_at: new Date().toISOString(),
   });
   if (error) return back("error=" + encodeURIComponent(error.message));
