@@ -29,14 +29,25 @@ export const DEFAULTS: Record<"manager" | "member", Record<Permission, boolean>>
   member: { view_all_projects: false, payments: false, manage_projects: false, manage_people: false, edit_notes: true, reports: true },
 };
 
+type Matrix = Record<"manager" | "member", Record<Permission, boolean>>;
+let cached: { at: number; matrix: Matrix } | null = null;
+const MATRIX_TTL_MS = 15_000; // the table changes rarely; this saves a database round trip on most page loads
+
 /** The manager and member columns of the permission table (saved choices over the defaults). */
-export async function loadMatrix() {
+export async function loadMatrix(): Promise<Matrix> {
+  if (cached && Date.now() - cached.at < MATRIX_TTL_MS) return cached.matrix;
   const { data } = await supabaseAdmin.from("role_permissions").select("role, permission, allowed");
-  const matrix = { manager: { ...DEFAULTS.manager }, member: { ...DEFAULTS.member } };
+  const matrix: Matrix = { manager: { ...DEFAULTS.manager }, member: { ...DEFAULTS.member } };
   for (const r of data ?? []) {
     if ((r.role === "manager" || r.role === "member") && r.permission in DEFAULTS.manager) matrix[r.role as "manager" | "member"][r.permission as Permission] = !!r.allowed;
   }
+  cached = { at: Date.now(), matrix };
   return matrix;
+}
+
+/** Called after the Access page saves, so this server sees the change straight away. */
+export function forgetMatrix() {
+  cached = null;
 }
 
 export type Access = {
@@ -51,21 +62,21 @@ export type Access = {
 
 /** Who is signed in, their role and what that role allows. null when nobody is signed in. */
 export const getAccess = cache(async (): Promise<Access | null> => {
-  const user = await getCurrentEmployee();
+  const user = await getCurrentEmployee(); // already includes the role: one lookup, not two
   if (!user) return null;
-  const [{ data }, matrix] = await Promise.all([supabaseAdmin.from("employees").select("access_role").eq("id", user.id).maybeSingle(), loadMatrix()]);
-  const stored = (data?.access_role as string | undefined) ?? "member";
-  const role: Role = isBootstrapAdmin(user.email) ? "admin" : isRole(stored) ? stored : "member";
-  const can = (p: Permission) => role === "admin" || matrix[role][p];
+  const role: Role = isBootstrapAdmin(user.email) ? "admin" : isRole(user.accessRole) ? user.accessRole : "member";
 
-  let scope: string[] | null = null;
-  if (!can("view_all_projects")) {
-    const [managed, assigned] = await Promise.all([
-      supabaseAdmin.from("projects").select("id").eq("project_manager_id", user.id),
-      supabaseAdmin.from("project_assignments").select("project_id").eq("employee_id", user.id),
-    ]);
-    scope = [...new Set([...(managed.data ?? []).map((r) => r.id as string), ...(assigned.data ?? []).map((r) => r.project_id as string)])];
-  }
+  // Admins need nothing else. Others: the permission table and their projects, fetched together.
+  const [matrix, managed, assigned] = await Promise.all([
+    role === "admin" ? Promise.resolve(null) : loadMatrix(),
+    role === "admin" ? null : supabaseAdmin.from("projects").select("id").eq("project_manager_id", user.id),
+    role === "admin" ? null : supabaseAdmin.from("project_assignments").select("project_id").eq("employee_id", user.id),
+  ]);
+  const can = (p: Permission) => role === "admin" || matrix![role as "manager" | "member"][p];
+
+  const scope = can("view_all_projects")
+    ? null
+    : [...new Set([...(managed?.data ?? []).map((r) => r.id as string), ...(assigned?.data ?? []).map((r) => r.project_id as string)])];
   const set = scope && new Set(scope);
   return { user, role, can, scope, sees: (id) => !set || set.has(id) };
 });

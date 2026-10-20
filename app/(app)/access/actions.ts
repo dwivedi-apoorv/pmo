@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { PERMISSIONS, isRole, requireAdmin, type Role } from "@/lib/access";
+import { PERMISSIONS, forgetMatrix, isRole, requireAdmin, type Role } from "@/lib/access";
 import { isBootstrapAdmin } from "@/lib/ms/config";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
@@ -36,5 +36,6 @@ export async function savePermissions(formData: FormData) {
   );
   const { error } = await supabaseAdmin.from("role_permissions").upsert(rows);
   if (error) throw new Error(error.message);
+  forgetMatrix();
   revalidatePath("/access");
 }

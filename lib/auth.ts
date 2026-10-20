@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
-export type CurrentEmployee = { id: string; name: string; email: string };
+export type CurrentEmployee = { id: string; name: string; email: string; accessRole: string };
 
 /**
  * The logged-in employee, or null. Checks the signed cookie AND that the person is still an active
@@ -17,11 +17,11 @@ export const getCurrentEmployee = cache(async (): Promise<CurrentEmployee | null
 
   const { data } = await supabaseAdmin
     .from("employees")
-    .select("id, name, email, is_active")
+    .select("id, name, email, is_active, access_role")
     .eq("id", session.employeeId)
     .maybeSingle();
   if (!data || !data.is_active || !data.email) return null;
-  return { id: data.id as string, name: data.name as string, email: data.email as string };
+  return { id: data.id as string, name: data.name as string, email: data.email as string, accessRole: (data.access_role as string | null) ?? "member" };
 });
 
 /** For pages: send anyone who isn't logged in to the login page. */
