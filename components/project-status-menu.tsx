@@ -91,7 +91,6 @@ export function ProjectStatusMenu({
   const [move, setMove] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [reason, setReason] = useState("");
 
   const current = move ? MOVES[move] : null;
   const needsReason = current ? reasonRequired(current.to) : false;
@@ -100,7 +99,6 @@ export function ProjectStatusMenu({
   function close() {
     setMove(null);
     setError(null);
-    setReason("");
   }
 
   function onSubmit(formData: FormData) {
@@ -166,11 +164,10 @@ export function ProjectStatusMenu({
                     id={`reason-${id}`}
                     options={reasons[current.to as "halted" | "ended" | "completed"]}
                     required={needsReason}
-                    onChange={setReason}
                   />
                 )}
                 {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" variant={current.destructive ? "destructive" : "default"} disabled={pending || (needsReason && !reason)}>
+                <Button type="submit" variant={current.destructive ? "destructive" : "default"} disabled={pending}>
                   {pending ? "Saving…" : current.cta}
                 </Button>
               </form>

@@ -1,62 +1,63 @@
 "use client";
 
 import { useState } from "react";
+import { PlusIcon, XIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { MultiSelect } from "@/components/multi-select";
 
-const NEW = "__new__";
+// Pick every reason that applies, or type a new one. Ticked ones are submitted as `reasons` and new ones as
+// `new_reasons`; the server adds new ones to the list for next time.
+export function ReasonPicker({ id, options, required }: { id: string; options: string[]; required: boolean }) {
+  const [added, setAdded] = useState<string[]>([]);
+  const [draft, setDraft] = useState("");
 
-// Pick a reason from the list, or choose "Add a new reason" and type one. Submits the final text as `reason`;
-// the server adds a new one to the list for next time.
-export function ReasonPicker({
-  id,
-  options,
-  required,
-  onChange,
-}: {
-  id: string;
-  options: string[];
-  required: boolean;
-  onChange: (value: string) => void;
-}) {
-  const [choice, setChoice] = useState("");
-  const [typed, setTyped] = useState("");
-  const value = choice === NEW ? typed.trim().replace(/\s+/g, " ") : choice;
+  function add() {
+    const name = draft.trim().replace(/\s+/g, " ");
+    if (!name) return;
+    if (!added.some((a) => a.toLowerCase() === name.toLowerCase())) setAdded([...added, name]);
+    setDraft("");
+  }
 
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-1.5">
       <Label htmlFor={id}>
-        Reason {required ? <span className="text-destructive">*</span> : <span className="text-muted-foreground">(optional)</span>}
+        Reasons {required ? <span className="text-destructive">*</span> : <span className="text-muted-foreground">(optional)</span>}
       </Label>
-      <select
-        id={id}
-        value={choice}
-        onChange={(e) => {
-          setChoice(e.target.value);
-          onChange(e.target.value === NEW ? typed.trim() : e.target.value);
-        }}
-        className="h-9 w-full rounded-md border bg-background px-2 text-sm"
-      >
-        <option value="">{required ? "Select a reason…" : "No reason"}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>{o}</option>
-        ))}
-        <option value={NEW}>＋ Add a new reason…</option>
-      </select>
-      {choice === NEW && (
+      <MultiSelect name="reasons" options={options.map((o) => ({ id: o, name: o }))} placeholder="Select reasons" />
+      <div className="flex gap-2">
         <Input
-          autoFocus
-          value={typed}
+          id={id}
+          value={draft}
           maxLength={80}
-          onChange={(e) => {
-            setTyped(e.target.value);
-            onChange(e.target.value.trim().replace(/\s+/g, " "));
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
           }}
-          placeholder="Type the new reason"
+          placeholder="Not in the list? Type a new reason"
           aria-label="New reason"
         />
+        <Button type="button" variant="outline" onClick={add} disabled={!draft.trim()}>
+          <PlusIcon /> Add
+        </Button>
+      </div>
+      {added.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {added.map((name) => (
+            <span key={name} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs">
+              {name} <span className="text-muted-foreground">(new)</span>
+              <button type="button" aria-label={`Remove ${name}`} className="opacity-60 hover:opacity-100" onClick={() => setAdded(added.filter((a) => a !== name))}>
+                <XIcon className="size-3" />
+              </button>
+              <input type="hidden" name="new_reasons" value={name} />
+            </span>
+          ))}
+        </div>
       )}
-      <input type="hidden" name="reason" value={value} />
     </div>
   );
 }

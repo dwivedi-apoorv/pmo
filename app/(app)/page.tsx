@@ -55,7 +55,7 @@ export default async function Home() {
     // Every project's status (for the cards at the top).
     limitTo(supabase.from("projects").select("status"), scope, "id").returns<{ status: string }[]>(),
     // Every halt and loss ever recorded, with its reason (for "why projects stop").
-    limitTo(supabase.from("project_status_log").select("status, reason, project_id").in("status", ["halted", "ended"]), scope).returns<{ status: string; reason: string | null }[]>(),
+    limitTo(supabase.from("project_status_log").select("status, reason, reasons, project_id").in("status", ["halted", "ended"]), scope).returns<{ status: string; reason: string | null; reasons: string[] | null }[]>(),
     // Projects onboarded this month, whatever their status now.
     limitTo(supabase.from("projects").select("id", { count: "exact", head: true }).gte("onboarding_date", month.start).lte("onboarding_date", month.end), scope, "id"),
     // Status changes made this month (India time): how many projects were halted or lost (ended).
@@ -90,8 +90,9 @@ export default async function Home() {
     const counts = new Map<string, number>();
     for (const r of whyRes.data ?? []) {
       if (r.status !== status) continue;
-      const key = r.reason?.trim() || "No reason recorded";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
+      // Each reason given counts once (a project can have several); older entries have only the text.
+      const given = r.reasons?.length ? r.reasons : [r.reason?.trim() || "No reason recorded"];
+      for (const key of given) counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
   };
@@ -412,8 +413,8 @@ export default async function Home() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         {[
-          { title: "Why projects are lost", text: "How often each reason was given when a project was marked lost.", rows: lostReasons },
-          { title: "Why projects are halted", text: "How often each reason was given when a project was halted.", rows: haltedReasons },
+          { title: "Why projects are lost", text: "How often each reason was given when a project was marked lost. A project can have several.", rows: lostReasons },
+          { title: "Why projects are halted", text: "How often each reason was given when a project was halted. A project can have several.", rows: haltedReasons },
         ].map((card) => (
           <Card key={card.title}>
             <CardHeader>

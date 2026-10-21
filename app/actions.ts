@@ -447,30 +447,37 @@ export async function changeProjectStatus(formData: FormData) {
   const project_id = str(formData.get("project_id"));
   requireProject(access, project_id);
   const status = str(formData.get("status"));
-  const reason = str(formData.get("reason"));
+  const note = str(formData.get("reason")); // a free note, only used when a project is resumed or reopened
 
   if (!project_id || !isProjectStatus(status)) throw new Error("Missing project or status.");
-  if (reasonRequired(status) && !reason) throw new Error("Please choose a reason.");
-  if (reason.length > 80 && status !== "active") throw new Error("Keep the reason under 80 characters.");
 
-  // A reason typed for the first time joins the list (matching an existing one ignoring capitals and spacing),
-  // so the next person can pick it, and so reasons can be counted.
-  let chosen = reason.replace(/\s+/g, " ");
-  if (chosen && status !== "active") {
+  // Reasons: every ticked one plus any typed in. A new one joins the list (matching an existing one ignoring
+  // capitals and spacing), so the next person can pick it, and so reasons can be counted.
+  const tidy = (v: string) => v.trim().replace(/\s+/g, " ");
+  const asked = [...formData.getAll("reasons"), ...formData.getAll("new_reasons")].map((v) => tidy(String(v))).filter(Boolean);
+  if (asked.some((r) => r.length > 80)) throw new Error("Keep each reason under 80 characters.");
+  const reasons: string[] = [];
+  if (status !== "active") {
     const { data: known } = await supabaseAdmin.from("status_reasons").select("name").eq("status", status);
-    const match = (known ?? []).find((r) => (r.name as string).trim().toLowerCase() === chosen.toLowerCase());
-    if (match) chosen = match.name as string;
-    else {
-      const { error: rErr } = await supabaseAdmin.from("status_reasons").insert({ status, name: chosen });
-      if (rErr) throw new Error(rErr.message);
+    for (const r of asked) {
+      const match = (known ?? []).find((k) => (k.name as string).trim().toLowerCase() === r.toLowerCase());
+      const name = match ? (match.name as string) : r;
+      if (!match) {
+        const { error: rErr } = await supabaseAdmin.from("status_reasons").insert({ status, name });
+        if (rErr && !/duplicate/i.test(rErr.message)) throw new Error(rErr.message);
+        known?.push({ name });
+      }
+      if (!reasons.some((x) => x.toLowerCase() === name.toLowerCase())) reasons.push(name);
     }
   }
+  if (reasonRequired(status) && reasons.length === 0) throw new Error("Please choose at least one reason.");
 
   // One database step updates the status and writes the history row, so they can't drift apart.
   const { error } = await supabaseAdmin.rpc("set_project_status", {
     p_project: project_id,
     p_status: status,
-    p_reason: chosen || null,
+    p_reason: note || null,
+    p_reasons: reasons,
   });
   if (error) throw new Error(error.message);
 

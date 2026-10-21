@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 024) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 025) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -57,7 +57,8 @@ create table project_status_log (
   id         uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects(id) on delete cascade,
   status     text not null check (status in ('active', 'halted', 'ended', 'completed')),
-  reason     text,
+  reason     text,                                  -- the reasons joined as text (for display)
+  reasons    text[] not null default '{}',          -- each reason on its own (for counting)
   changed_at timestamptz not null default now()
 );
 
@@ -394,13 +395,16 @@ grant  execute on function set_project_team(uuid, uuid, uuid[], date) to service
 create or replace function set_project_status(
   p_project uuid,
   p_status  text,
-  p_reason  text default null
+  p_reason  text default null,                -- a free note (used when a project is resumed or reopened)
+  p_reasons text[] default '{}'               -- the reasons picked from the list
 ) returns void
 language plpgsql
 as $$
 declare
   cur_status text;
   today      date := (now() at time zone 'Asia/Kolkata')::date;
+  v_reasons  text[] := coalesce((select array_agg(distinct btrim(r)) from unnest(coalesce(p_reasons, '{}')) r where btrim(r) <> ''), '{}');
+  v_text     text;
 begin
   select status into cur_status from projects where id = p_project for update;
   if not found then
@@ -412,13 +416,14 @@ begin
   if p_status = cur_status then
     raise exception 'The project is already %.', cur_status;
   end if;
-  if p_status in ('halted', 'ended') and coalesce(btrim(p_reason), '') = '' then
+  v_text := coalesce(nullif(array_to_string(v_reasons, ', '), ''), nullif(btrim(p_reason), ''));
+  if p_status in ('halted', 'ended') and v_text is null then
     raise exception 'A reason is required.';
   end if;
 
   update projects set status = p_status where id = p_project;
-  insert into project_status_log (project_id, status, reason)
-  values (p_project, p_status, nullif(btrim(p_reason), ''));
+  insert into project_status_log (project_id, status, reason, reasons)
+  values (p_project, p_status, v_text, v_reasons);
 
   if p_status in ('ended', 'completed') then
     update project_team_history
@@ -444,8 +449,8 @@ begin
 end;
 $$;
 
-revoke execute on function set_project_status(uuid, text, text) from public, anon, authenticated;
-grant  execute on function set_project_status(uuid, text, text) to service_role;
+revoke execute on function set_project_status(uuid, text, text, text[]) from public, anon, authenticated;
+grant  execute on function set_project_status(uuid, text, text, text[]) to service_role;
 
 -- Deactivating an employee hands their open projects over, and now records it in the history.
 -- Each step is its own statement, in order: close the old stretch first, then open the new one.
