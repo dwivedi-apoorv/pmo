@@ -78,7 +78,7 @@ export default async function ProjectsPage({
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
 
-  const [projectsRes, peopleRes, ledgerRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
+  const [projectsRes, peopleRes, ledgerRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
     limitTo(
       supabase
         .from("projects")
@@ -93,6 +93,7 @@ export default async function ProjectsPage({
     canPay
       ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
       : Promise.resolve({ data: [] as Due[], error: null }),
+    supabase.from("status_reasons").select("status, name").order("name").returns<{ status: "halted" | "ended" | "completed"; name: string }[]>(),
     limitTo(supabase.from("project_status_log").select("project_id, status, reason, changed_at").order("changed_at", { ascending: false }), scope).returns<StatusLogRow[]>(),
     limitTo(supabase.from("project_team_history").select("id, project_id, employee_id, employee_name, role, started_on, ended_on"), scope).returns<TeamPeriod[]>(),
     limitTo(supabase.from("report_log").select("project_id, due_date, sent_at"), scope).returns<ReportSend[]>(),
@@ -101,7 +102,7 @@ export default async function ProjectsPage({
     supabase.from("project_note_versions").select(VERSION_COLUMNS).order("saved_at", { ascending: false }).returns<NoteVersion[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? reasonsRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -112,6 +113,8 @@ export default async function ProjectsPage({
   }
 
   const ledger = ledgerRes.data ?? [];
+  const reasonLists: Record<"halted" | "ended" | "completed", string[]> = { halted: [], ended: [], completed: [] };
+  for (const r of reasonsRes.data ?? []) reasonLists[r.status].push(r.name);
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
   const keyOf = (p: Project): string | number =>
     sort === "name" ? p.name
@@ -131,7 +134,7 @@ export default async function ProjectsPage({
     attentionRows(activeProjects, ledger),
     reportAttention(activeProjects, sendsRes.data ?? [], todayISO())
   );
-  const counts: Record<Tab, number> = { all: allProjects.length, active: 0, halted: 0, ended: 0 };
+  const counts: Record<Tab, number> = { all: allProjects.length, active: 0, halted: 0, completed: 0, ended: 0 };
   for (const p of allProjects) counts[p.status]++;
   // The newest log entry per project says why it is in its current status.
   const lastChange = new Map<string, StatusLogRow>();
@@ -189,7 +192,7 @@ export default async function ProjectsPage({
 
       <div className="flex flex-wrap items-center gap-3">
       <div className="inline-flex w-fit rounded-lg bg-muted p-1 text-sm" role="tablist" aria-label="Project status">
-        {(["active", "halted", "ended", "all"] as const).map((t) => (
+        {(["active", "halted", "completed", "ended", "all"] as const).map((t) => (
           <Link
             key={t}
             href={`/projects?${new URLSearchParams({ ...(t === "active" ? {} : { status: t }), ...(serviceFilter ? { service: serviceFilter } : {}), ...(q ? { q } : {}) })}`}
@@ -395,7 +398,7 @@ export default async function ProjectsPage({
                         notes={(notesRes.data ?? []).filter((n) => n.project_id === p.id)}
                         noteVersions={versionsFor(p.id)}
                       />}
-                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} />}
+                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} />}
                       </div>
                     </TableCell>
                   </TableRow>

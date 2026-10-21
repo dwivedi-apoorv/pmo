@@ -1,3 +1,4 @@
+import { isClosed } from "@/lib/status";
 import { limitTo, requirePageAccess } from "@/lib/access";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
@@ -60,7 +61,7 @@ export default async function PeoplePage({
   const roster = peopleRes.people;
   const openCounts = new Map(
     roster.map((e) => {
-      const open = projects.filter((p) => p.status !== "ended");
+      const open = projects.filter((p) => !isClosed(p.status));
       const managing = open.filter((p) => p.project_manager_id === e.id).length;
       const assigned = open.filter((p) => p.project_assignments.some((a) => a.employee_id === e.id)).length;
       return [e.id, managing + assigned] as const;
@@ -130,7 +131,7 @@ export default async function PeoplePage({
               {people.map((e) => {
                 const managed = projects.filter((p) => p.project_manager_id === e.id);
                 const assigned = projects.filter((p) => p.project_assignments.some((a) => a.employee_id === e.id));
-                const open = (p: ProjectRow) => p.status !== "ended";
+                const open = (p: ProjectRow) => !isClosed(p.status);
                 const managedOpen = managed.filter(open);
                 const assignedOpen = assigned.filter(open);
                 return (

@@ -38,7 +38,7 @@ export default async function Home() {
   const { scope } = access;
   const canPay = access.can("payments");
   const month = projectionMonths(todayISO(), 1)[0];
-  const [projectsRes, peopleRes, payments, statusCountRes, onboardedRes, changesRes, sendsRes, tagsRes, servicesRes] = await Promise.all([
+  const [projectsRes, peopleRes, payments, statusCountRes, whyRes, onboardedRes, changesRes, sendsRes, tagsRes, servicesRes] = await Promise.all([
     limitTo(
       supabase
         .from("projects")
@@ -54,6 +54,8 @@ export default async function Home() {
     loadPaymentsData({ scope, money: canPay }),
     // Every project's status (for the cards at the top).
     limitTo(supabase.from("projects").select("status"), scope, "id").returns<{ status: string }[]>(),
+    // Every halt and loss ever recorded, with its reason (for "why projects stop").
+    limitTo(supabase.from("project_status_log").select("status, reason, project_id").in("status", ["halted", "ended"]), scope).returns<{ status: string; reason: string | null }[]>(),
     // Projects onboarded this month, whatever their status now.
     limitTo(supabase.from("projects").select("id", { count: "exact", head: true }).gte("onboarding_date", month.start).lte("onboarding_date", month.end), scope, "id"),
     // Status changes made this month (India time): how many projects were halted or lost (ended).
@@ -71,7 +73,7 @@ export default async function Home() {
     supabase.from("services").select("id, name").order("name").returns<Service[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? statusCountRes.error ?? onboardedRes.error ?? changesRes.error ?? sendsRes.error ?? tagsRes.error ?? servicesRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? statusCountRes.error ?? whyRes.error ?? onboardedRes.error ?? changesRes.error ?? sendsRes.error ?? tagsRes.error ?? servicesRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -81,8 +83,20 @@ export default async function Home() {
     );
   }
 
-  const statusCounts = { halted: 0, ended: 0, total: (statusCountRes.data ?? []).length };
-  for (const p of statusCountRes.data ?? []) if (p.status === "halted" || p.status === "ended") statusCounts[p.status]++;
+  const statusCounts = { halted: 0, completed: 0, ended: 0, total: (statusCountRes.data ?? []).length };
+  for (const p of statusCountRes.data ?? []) if (p.status === "halted" || p.status === "completed" || p.status === "ended") statusCounts[p.status]++;
+  // Why projects stop: how many times each reason was given, most common first.
+  const reasonCounts = (status: string) => {
+    const counts = new Map<string, number>();
+    for (const r of whyRes.data ?? []) {
+      if (r.status !== status) continue;
+      const key = r.reason?.trim() || "No reason recorded";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+  };
+  const lostReasons = reasonCounts("ended");
+  const haltedReasons = reasonCounts("halted");
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
   const projects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
   const today = todayISO();
@@ -127,6 +141,7 @@ export default async function Home() {
   const onboarded = onboardedRes.count ?? 0;
   const halted = (changesRes.data ?? []).filter((c) => c.status === "halted").length;
   const lost = (changesRes.data ?? []).filter((c) => c.status === "ended").length;
+  const completed = (changesRes.data ?? []).filter((c) => c.status === "completed").length;
   const monthRows = monthItems(month, active, ledger, labelOf);
   const monthExpected = monthRows.reduce((sum, it) => sum + it.amount, 0);
   const monthReceived = monthRows.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
@@ -172,12 +187,13 @@ export default async function Home() {
     <div className="w-full space-y-6 p-4 sm:p-6">
       <PageHeader title="Dashboard" description="An overview of whats happening!" />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         {[
           { label: "Total projects", count: statusCounts.total, href: "/projects?status=all" },
           { label: "Active projects", count: projects.length, href: "/projects" },
           { label: "Halted projects", count: statusCounts.halted, href: "/projects?status=halted" },
-          { label: "Completed projects", count: statusCounts.ended, href: "/projects?status=ended" },
+          { label: "Completed projects", count: statusCounts.completed, href: "/projects?status=completed" },
+          { label: "Lost projects", count: statusCounts.ended, href: "/projects?status=ended" },
         ].map((c) => (
           <Card size="sm" key={c.label}>
             <CardHeader>
@@ -350,14 +366,14 @@ export default async function Home() {
                 Onboarding
                 <span className="ml-2 text-sm font-normal text-muted-foreground">{month.label}</span>
               </CardTitle>
-              <CardDescription>Halted and lost count the status changes made this month.</CardDescription>
+              <CardDescription>Halted, completed and lost count the status changes made this month.</CardDescription>
             </div>
             <Link href="/onboarding" className="text-sm font-medium underline-offset-4 hover:underline">
               Onboarding history →
             </Link>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-3 gap-4">
+            <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <div>
                 <dt className="text-sm text-muted-foreground">Onboarded</dt>
                 <dd className="text-2xl font-semibold tabular-nums">{onboarded}</dd>
@@ -367,7 +383,11 @@ export default async function Home() {
                 <dd className="text-2xl font-semibold tabular-nums">{halted}</dd>
               </div>
               <div>
-                <dt className="text-sm text-muted-foreground">Lost (ended)</dt>
+                <dt className="text-sm text-muted-foreground">Completed</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{completed}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-muted-foreground">Lost</dt>
                 <dd className="text-2xl font-semibold tabular-nums">{lost}</dd>
               </div>
             </dl>
@@ -388,6 +408,39 @@ export default async function Home() {
             </Link>
           </CardContent>
         </Card>}
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {[
+          { title: "Why projects are lost", text: "How often each reason was given when a project was marked lost.", rows: lostReasons },
+          { title: "Why projects are halted", text: "How often each reason was given when a project was halted.", rows: haltedReasons },
+        ].map((card) => (
+          <Card key={card.title}>
+            <CardHeader>
+              <CardTitle>{card.title}</CardTitle>
+              <CardDescription>{card.text}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {card.rows.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nothing recorded yet.</p>
+              ) : (
+                <ul className="grid gap-3">
+                  {card.rows.slice(0, 8).map((r) => (
+                    <li key={r.reason} className="grid gap-1">
+                      <div className="flex items-baseline justify-between gap-2 text-sm">
+                        <span className="truncate">{r.reason}</span>
+                        <span className="shrink-0 font-semibold tabular-nums">{r.count}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${(r.count / card.rows[0].count) * 100}%` }} />
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

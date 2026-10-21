@@ -450,13 +450,27 @@ export async function changeProjectStatus(formData: FormData) {
   const reason = str(formData.get("reason"));
 
   if (!project_id || !isProjectStatus(status)) throw new Error("Missing project or status.");
-  if (reasonRequired(status) && !reason) throw new Error("Please give a reason.");
+  if (reasonRequired(status) && !reason) throw new Error("Please choose a reason.");
+  if (reason.length > 80 && status !== "active") throw new Error("Keep the reason under 80 characters.");
+
+  // A reason typed for the first time joins the list (matching an existing one ignoring capitals and spacing),
+  // so the next person can pick it, and so reasons can be counted.
+  let chosen = reason.replace(/\s+/g, " ");
+  if (chosen && status !== "active") {
+    const { data: known } = await supabaseAdmin.from("status_reasons").select("name").eq("status", status);
+    const match = (known ?? []).find((r) => (r.name as string).trim().toLowerCase() === chosen.toLowerCase());
+    if (match) chosen = match.name as string;
+    else {
+      const { error: rErr } = await supabaseAdmin.from("status_reasons").insert({ status, name: chosen });
+      if (rErr) throw new Error(rErr.message);
+    }
+  }
 
   // One database step updates the status and writes the history row, so they can't drift apart.
   const { error } = await supabaseAdmin.rpc("set_project_status", {
     p_project: project_id,
     p_status: status,
-    p_reason: reason || null,
+    p_reason: chosen || null,
   });
   if (error) throw new Error(error.message);
 

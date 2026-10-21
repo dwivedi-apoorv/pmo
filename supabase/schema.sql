@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 022) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 024) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -23,7 +23,7 @@ create table projects (
   payment_amount_usd numeric(12, 2) check (payment_amount_usd >= 0),
   project_manager_id uuid references employees(id) on delete set null,  -- optional
   status             text not null default 'active'
-                     check (status in ('active', 'halted', 'ended')),
+                     check (status in ('active', 'halted', 'ended', 'completed')),
   created_at         timestamptz not null default now()
 );
 
@@ -56,7 +56,7 @@ create table payment_dues (
 create table project_status_log (
   id         uuid primary key default gen_random_uuid(),
   project_id uuid not null references projects(id) on delete cascade,
-  status     text not null check (status in ('active', 'halted', 'ended')),
+  status     text not null check (status in ('active', 'halted', 'ended', 'completed')),
   reason     text,
   changed_at timestamptz not null default now()
 );
@@ -406,7 +406,7 @@ begin
   if not found then
     raise exception 'Project not found.';
   end if;
-  if p_status not in ('active', 'halted', 'ended') then
+  if p_status not in ('active', 'halted', 'ended', 'completed') then
     raise exception 'Invalid status.';
   end if;
   if p_status = cur_status then
@@ -420,11 +420,11 @@ begin
   insert into project_status_log (project_id, status, reason)
   values (p_project, p_status, nullif(btrim(p_reason), ''));
 
-  if p_status = 'ended' then
+  if p_status in ('ended', 'completed') then
     update project_team_history
        set ended_on = greatest(today, started_on)
      where project_id = p_project and ended_on is null;
-  elsif cur_status = 'ended' then
+  elsif cur_status in ('ended', 'completed') then
     -- Reopened: the manager and team assigned to the project start again today.
     insert into project_team_history (project_id, employee_id, employee_name, role, started_on)
     select p.id, e.id, e.name, 'manager', today
@@ -463,12 +463,12 @@ declare
 begin
   select coalesce(array_agg(id), '{}') into managed_ids
   from projects
-  where project_manager_id = p_employee and status <> 'ended';
+  where project_manager_id = p_employee and status not in ('ended', 'completed');
 
   select coalesce(array_agg(pa.project_id), '{}') into assigned_ids
   from project_assignments pa
   join projects p on p.id = pa.project_id
-  where pa.employee_id = p_employee and p.status <> 'ended';
+  where pa.employee_id = p_employee and p.status not in ('ended', 'completed');
 
   if cardinality(managed_ids) > 0 then
     if p_manager_to is null or p_manager_to = p_employee or not exists (
@@ -555,7 +555,7 @@ begin
 
   if lower(btrim(coalesce(old_role, ''))) = 'project manager'
      and lower(btrim(p_role)) <> 'project manager'
-     and exists (select 1 from projects where project_manager_id = p_employee and status <> 'ended') then
+     and exists (select 1 from projects where project_manager_id = p_employee and status not in ('ended', 'completed')) then
     raise exception 'This person still manages projects. Hand them over before changing the role from Project Manager.';
   end if;
 
@@ -769,7 +769,7 @@ insert into project_team_history (project_id, employee_id, employee_name, role, 
 select p.id, e.id, e.name, 'manager', (p.created_at at time zone 'Asia/Kolkata')::date
 from projects p
 join employees e on e.id = p.project_manager_id
-where p.status <> 'ended'
+where p.status not in ('ended', 'completed')
   and not exists (select 1 from project_team_history h where h.project_id = p.id and h.role = 'manager' and h.ended_on is null);
 
 insert into project_team_history (project_id, employee_id, employee_name, role, started_on)
@@ -777,7 +777,7 @@ select pa.project_id, e.id, e.name, 'member', (pa.assigned_at at time zone 'Asia
 from project_assignments pa
 join projects p  on p.id = pa.project_id
 join employees e on e.id = pa.employee_id
-where p.status <> 'ended'
+where p.status not in ('ended', 'completed')
   and not exists (
     select 1 from project_team_history h
     where h.project_id = pa.project_id and h.employee_id = pa.employee_id and h.role = 'member' and h.ended_on is null
@@ -797,3 +797,37 @@ alter table role_permissions enable row level security;
 
 update employees set access_role = 'manager' where access_role = 'member' and lower(btrim(role)) = 'project manager';
 update employees set access_role = 'admin' where lower(email) = 'apoorv.dwivedi@digirockettechnologies.com';
+
+-- ---- Reasons for stopping a project (migration-024) ----
+create table if not exists status_reasons (
+  id         uuid primary key default gen_random_uuid(),
+  status     text not null check (status in ('halted', 'ended', 'completed')),   -- ended = lost
+  name       text not null check (char_length(btrim(name)) between 1 and 80),
+  created_at timestamptz not null default now()
+);
+create unique index if not exists status_reasons_name_key on status_reasons (status, lower(btrim(name)));
+alter table status_reasons enable row level security;   -- no policies: only the server can use it
+
+insert into status_reasons (status, name) values
+  ('ended', 'Budget constraints'),
+  ('ended', 'Moved to another agency'),
+  ('ended', 'Not satisfied with results'),
+  ('ended', 'Brought work in-house'),
+  ('ended', 'Business closed'),
+  ('ended', 'Payment issues'),
+  ('ended', 'Poor communication'),
+  ('halted', 'Awaiting client approval'),
+  ('halted', 'Budget on hold'),
+  ('halted', 'Client unresponsive'),
+  ('halted', 'Payment pending'),
+  ('halted', 'Seasonal pause'),
+  ('completed', 'Project delivered'),
+  ('completed', 'Contract term finished')
+on conflict do nothing;
+
+-- Keep the short reasons already typed in the past (long sentences are left out of the list).
+insert into status_reasons (status, name)
+select distinct on (status, lower(regexp_replace(btrim(reason), '\s+', ' ', 'g'))) status, regexp_replace(btrim(reason), '\s+', ' ', 'g')
+from project_status_log
+where status in ('halted', 'ended', 'completed') and reason is not null and char_length(btrim(reason)) between 1 and 60
+on conflict do nothing;

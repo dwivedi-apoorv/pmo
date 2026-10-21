@@ -1,3 +1,4 @@
+import { STATUS_LABEL } from "@/lib/status";
 import { dueLabel, todayISO } from "@/lib/reporting";
 import { formatUSD, type PaymentPlan } from "@/lib/payments";
 import { attentionRows, type Due } from "@/lib/dues";
@@ -60,7 +61,7 @@ export function buildDigests(input: {
   for (const r of inc.payments ? attentionRows(active, input.ledger, today) : []) {
     const p = byId.get(r.project_id);
     if (!p) continue;
-    const tag = p.status === "active" ? "" : ` [${p.status}]`;
+    const tag = p.status === "active" ? "" : ` [${STATUS_LABEL[p.status].toLowerCase()}]`;
     add(payments, p.project_manager_id, {
       days: r.days,
       text: `${p.name}${tag} (${p.client_name}): ${formatUSD(r.amount)} · ${when(r.days)} · due ${r.due}`,

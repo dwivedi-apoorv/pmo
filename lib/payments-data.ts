@@ -2,7 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { limitTo } from "@/lib/access";
 import type { PaymentPlan } from "@/lib/payments";
 import type { Due } from "@/lib/dues";
-import type { ProjectStatus } from "@/lib/status";
+import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
 
 export type ProjectInfo = { name: string; client: string; status: ProjectStatus; managerId: string | null };
 export type PlanRow = { id: string; name: string; client_name: string; status: ProjectStatus; project_manager_id: string | null } & PaymentPlan;
@@ -36,7 +36,7 @@ export async function loadPaymentsData(opts: { scope?: string[] | null; money?: 
     /** Name for display; halted and ended projects carry their status, e.g. "Acme (halted)". */
     labelOf: (id: string) => {
       const i = info.get(id);
-      return !i ? "Unknown project" : i.status === "active" ? i.name : `${i.name} (${i.status})`;
+      return !i ? "Unknown project" : i.status === "active" ? i.name : `${i.name} (${STATUS_LABEL[i.status].toLowerCase()})`;
     },
   };
 }

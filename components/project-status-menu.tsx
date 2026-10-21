@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CircleStopIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleStopIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ReasonPicker } from "@/components/reason-picker";
 import { reasonRequired, type ProjectStatus } from "@/lib/status";
 import { changeProjectStatus } from "@/app/actions";
 
@@ -34,13 +35,21 @@ const MOVES: Record<
     text: "Use this when work or billing is paused or suspended. A halted project drops off the dashboard, reports, payments and this month's revenue (unless it still owes money) until you resume it. Nothing is deleted.",
     cta: "Halt Project",
   },
+  complete: {
+    to: "completed",
+    menu: "Mark as Completed",
+    icon: CheckCircle2Icon,
+    title: "Complete",
+    text: "Use this when the work was finished. A completed project drops off the dashboard, reports, payments and this month's revenue (unless it still owes money). Its history is kept, and you can reopen it later.",
+    cta: "Mark as Completed",
+  },
   end: {
     to: "ended",
-    menu: "End Project",
+    menu: "Mark as Lost",
     icon: CircleStopIcon,
-    title: "End",
-    text: "Use this when the engagement is over. An ended project drops off the dashboard, reports, payments and this month's revenue (unless it still owes money). Its history is kept, and you can reopen it later.",
-    cta: "End Project",
+    title: "Mark as lost",
+    text: "Use this when the client left or the project was lost. A lost project drops off the dashboard, reports, payments and this month's revenue (unless it still owes money). Its history is kept, and you can reopen it later.",
+    cta: "Mark as Lost",
     destructive: true,
   },
   resume: {
@@ -62,23 +71,27 @@ const MOVES: Record<
 };
 
 const OPTIONS: Record<ProjectStatus, string[]> = {
-  active: ["halt", "end"],
-  halted: ["resume", "end"],
-  ended: ["reopen"],
+  active: ["halt", "complete", "end"],
+  halted: ["resume", "complete", "end"],
+  completed: ["reopen"],
+  ended: ["reopen", "complete"],
 };
 
 export function ProjectStatusMenu({
   id,
   name,
   status,
+  reasons,
 }: {
   id: string;
   name: string;
   status: ProjectStatus;
+  reasons: Record<"halted" | "ended" | "completed", string[]>;
 }) {
   const [move, setMove] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [reason, setReason] = useState("");
 
   const current = move ? MOVES[move] : null;
   const needsReason = current ? reasonRequired(current.to) : false;
@@ -87,6 +100,7 @@ export function ProjectStatusMenu({
   function close() {
     setMove(null);
     setError(null);
+    setReason("");
   }
 
   function onSubmit(formData: FormData) {
@@ -105,7 +119,7 @@ export function ProjectStatusMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger
-          render={<Button variant="ghost" size="icon-sm" aria-label={`Status actions for ${name}`} title="Halt or end" />}
+          render={<Button variant="ghost" size="icon-sm" aria-label={`Status actions for ${name}`} title="Halt, complete or mark as lost" />}
         >
           <MoreHorizontalIcon />
         </DropdownMenuTrigger>
@@ -139,26 +153,24 @@ export function ProjectStatusMenu({
               <form action={onSubmit} className="grid gap-4">
                 <input type="hidden" name="project_id" value={id} />
                 <input type="hidden" name="status" value={current.to} />
-                <div className="grid gap-1.5">
-                  <Label htmlFor={`reason-${id}`}>
-                    Reason {needsReason ? <span className="text-destructive">*</span> : <span className="text-muted-foreground">(optional)</span>}
-                  </Label>
-                  <Textarea
+                {current.to === "active" ? (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor={`reason-${id}`}>
+                      Note <span className="text-muted-foreground">(optional)</span>
+                    </Label>
+                    <Textarea id={`reason-${id}`} name="reason" rows={3} placeholder="e.g. Client confirmed new budget" />
+                  </div>
+                ) : (
+                  <ReasonPicker
+                    key={current.to}
                     id={`reason-${id}`}
-                    name="reason"
-                    rows={3}
+                    options={reasons[current.to as "halted" | "ended" | "completed"]}
                     required={needsReason}
-                    placeholder={
-                      current.to === "halted"
-                        ? "e.g. Client paused work until the new budget is approved"
-                        : current.to === "ended"
-                          ? "e.g. Contract completed / client did not renew"
-                          : "e.g. Client confirmed new budget"
-                    }
+                    onChange={setReason}
                   />
-                </div>
+                )}
                 {error && <p className="text-sm text-destructive">{error}</p>}
-                <Button type="submit" variant={current.destructive ? "destructive" : "default"} disabled={pending}>
+                <Button type="submit" variant={current.destructive ? "destructive" : "default"} disabled={pending || (needsReason && !reason)}>
                   {pending ? "Saving…" : current.cta}
                 </Button>
               </form>
