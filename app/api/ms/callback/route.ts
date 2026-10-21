@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getAccess } from "@/lib/access";
+import { firstName, logActivity } from "@/lib/activity";
 import { encryptSecret } from "@/lib/crypto";
 import { appUrl } from "@/lib/ms/config";
 import { OAUTH_COOKIE, readOauthState } from "@/lib/ms/state";
@@ -43,5 +44,6 @@ export async function GET(req: NextRequest) {
     connected_at: new Date().toISOString(),
   });
   if (error) return back("error=" + encodeURIComponent(error.message));
+  await logActivity({ actor: me.user, group: "settings", action: "microsoft_connected", summary: `${firstName(me.user.name)} connected the Microsoft account ${who.data.mail ?? who.data.userPrincipalName ?? who.data.displayName ?? ""} to send Teams messages` });
   return back("connected=1");
 }

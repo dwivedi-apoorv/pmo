@@ -10,6 +10,8 @@ import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
 import { requirePermission, requireProject, type Access } from "@/lib/access";
+import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
+import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
 // "" and "none" (the select's "— None —" option) both mean no project manager
@@ -68,6 +70,12 @@ async function currentTeam(projectId: string) {
     manager: (p.data?.project_manager_id as string | null) ?? null,
     members: new Set((a.data ?? []).map((r) => r.employee_id as string)),
   };
+}
+
+const usd = (n: number | null) => (n === null || n === undefined ? "none" : formatUSD(Number(n)));
+async function projectLabel(id: string) {
+  const { data } = await supabaseAdmin.from("projects").select("name").eq("id", id).maybeSingle();
+  return (data?.name as string | undefined) ?? "a project";
 }
 
 /** People who are on the new team but weren't on the old one. */
@@ -180,6 +188,17 @@ export async function createProject(formData: FormData) {
   }
 
   await runBackfill(data.id, payment, backfillUntil);
+
+  const who = await employeeNames([project_manager_id, ...assignees]);
+  const team = assignees.map((id) => who.get(id)).filter((n): n is string => !!n);
+  await logActivity({
+    actor: me,
+    group: "project",
+    action: "project_created",
+    projectId: data.id,
+    projectName: name,
+    summary: `${firstName(me.name)} created the project ${name} for ${client_name}${project_manager_id ? `, managed by ${who.get(project_manager_id)}` : ""}${team.length ? `, with ${list(team)}` : ""}`,
+  });
   revalidatePath("/payments");
 
   revalidatePath("/");
@@ -203,6 +222,18 @@ export async function updateProject(formData: FormData) {
   const payment = access.can("payments") ? parsePayment(formData) : null;
   const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
+
+  const { data: old } = await supabaseAdmin
+    .from("projects")
+    .select("name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd")
+    .eq("id", project_id)
+    .maybeSingle();
+  const servicesOf = async () =>
+    ((await supabaseAdmin.from("project_services").select("services(name)").eq("project_id", project_id)).data ?? [])
+      .map((r: any) => (Array.isArray(r.services) ? r.services[0]?.name : r.services?.name) as string | undefined)
+      .filter((n): n is string => !!n)
+      .sort();
+  const servicesBefore = await servicesOf();
 
   const { error } = await supabaseAdmin
     .from("projects")
@@ -233,6 +264,49 @@ export async function updateProject(formData: FormData) {
   after(() => notifyTeamChanged(project_id, before, newManager, newMembers, added.map((a) => a.employeeId)));
 
   await runBackfill(project_id, payment, backfillUntil);
+
+  // ---- activity log: one line for each kind of change ----
+  const who = firstName(me.name);
+  const log = (group: "project" | "payment", action: string, summary: string, details?: unknown) =>
+    logActivity({ actor: me, group, action, summary, projectId: project_id, projectName: name, details });
+  const shown = (v: unknown) => (v === null || v === undefined || v === "" ? "empty" : String(v));
+  const changes: { field: string; from: string; to: string }[] = [];
+  const track = (field: string, from: unknown, to: unknown) => from !== to && changes.push({ field, from: shown(from), to: shown(to) });
+  if (old) {
+    track("project name", old.name, name);
+    track("client", old.client_name, client_name);
+    track("website", old.website, normalizeUrl(websiteRaw));
+    track("onboarding date", old.onboarding_date, onboarding_date);
+    track("reporting date", old.reporting_date, reporting_date);
+  }
+  if (changes.length) await log("project", "project_edited", `${who} edited ${name}: ${changes.map((c) => `${c.field} ${c.from} → ${c.to}`).join("; ")}`, changes);
+
+  const servicesAfter = await servicesOf();
+  const addedSvc = servicesAfter.filter((x) => !servicesBefore.includes(x));
+  const removedSvc = servicesBefore.filter((x) => !servicesAfter.includes(x));
+  if (addedSvc.length || removedSvc.length) {
+    await log("project", "services_changed", `${who} changed the services of ${name}${addedSvc.length ? `: added ${list(addedSvc)}` : ""}${removedSvc.length ? `${addedSvc.length ? ";" : ":"} removed ${list(removedSvc)}` : ""}`);
+  }
+
+  const gone = [...before.members].filter((m) => !newMembers.includes(m) && m !== newManager);
+  const came = newMembers.filter((m) => !before.members.has(m) && m !== newManager);
+  if (newManager !== before.manager || gone.length || came.length) {
+    const nm = await employeeNames([before.manager, newManager, ...gone, ...came]);
+    const parts: string[] = [];
+    if (newManager !== before.manager) parts.push(`manager ${before.manager ? nm.get(before.manager) ?? "someone" : "none"} → ${newManager ? nm.get(newManager) ?? "someone" : "none"}`);
+    if (came.length) parts.push(`added ${list(came.map((id) => nm.get(id) ?? "someone"))}`);
+    if (gone.length) parts.push(`removed ${list(gone.map((id) => nm.get(id) ?? "someone"))}`);
+    await log("project", "team_changed", `${who} changed the team of ${name}: ${parts.join("; ")}${effective !== todayISO() ? ` (effective ${effective})` : ""}`);
+  }
+
+  if (old && payment) {
+    const pc: string[] = [];
+    if (Number(old.payment_amount_usd) !== payment.payment_amount_usd) pc.push(`amount ${usd(old.payment_amount_usd)} → ${usd(payment.payment_amount_usd)}`);
+    if (old.payment_term !== payment.payment_term) pc.push(`term ${termLabel(old.payment_term) || "none"} → ${termLabel(payment.payment_term)}`);
+    if (old.payment_method !== payment.payment_method) pc.push(`method ${methodLabel(old.payment_method) || "none"} → ${methodLabel(payment.payment_method)}`);
+    if (old.payment_date !== payment.payment_date) pc.push(`first payment ${shown(old.payment_date)} → ${payment.payment_date}`);
+    if (pc.length) await log("payment", "payment_plan_changed", `${who} changed the payment plan of ${name}: ${pc.join("; ")}`);
+  }
   revalidatePath("/payments");
   revalidatePath("/");
 }
@@ -261,6 +335,7 @@ export async function createEmployee(formData: FormData) {
     if (error.code === "23505") throw new Error("An employee with this email already exists.");
     throw new Error(error.message);
   }
+  await logActivity({ actor: me, group: "people", action: "employee_added", summary: `${firstName(me.name)} added the employee ${name} (${role}, ${email})` });
 
   revalidatePath("/");
 }
@@ -277,6 +352,7 @@ export async function updateEmployee(formData: FormData) {
   if (!name || !email || !roleRaw) throw new Error("Name, email and role are required.");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Enter a valid email address.");
 
+  const { data: oldEmp } = await supabaseAdmin.from("employees").select("name, email, role").eq("id", employee_id).maybeSingle();
   const { error } = await supabaseAdmin.rpc("update_employee", {
     p_employee: employee_id,
     p_name: name,
@@ -286,6 +362,14 @@ export async function updateEmployee(formData: FormData) {
   if (error) {
     if (error.code === "23505") throw new Error("Another employee already uses this email.");
     throw new Error(error.message);
+  }
+  if (oldEmp) {
+    const newRole = await canonicalRole(roleRaw);
+    const ch: string[] = [];
+    if (oldEmp.name !== name) ch.push(`name ${oldEmp.name} → ${name}`);
+    if ((oldEmp.email as string | null)?.toLowerCase() !== email) ch.push(`email ${oldEmp.email} → ${email}`);
+    if (oldEmp.role !== newRole) ch.push(`role ${oldEmp.role ?? "none"} → ${newRole}`);
+    if (ch.length) await logActivity({ actor: me, group: "people", action: "employee_edited", summary: `${firstName(me.name)} edited ${oldEmp.name}: ${ch.join("; ")}` });
   }
 
   revalidatePath("/");
@@ -299,12 +383,19 @@ export async function deactivateEmployee(formData: FormData) {
   const employee_id = str(formData.get("employee_id"));
   if (!employee_id) return;
 
+  const managerTo = str(formData.get("manager_to")) || null;
+  const assigneeTo = str(formData.get("assignee_to")) || null;
   const { error } = await supabaseAdmin.rpc("deactivate_employee", {
     p_employee: employee_id,
-    p_manager_to: str(formData.get("manager_to")) || null,
-    p_assignee_to: str(formData.get("assignee_to")) || null,
+    p_manager_to: managerTo,
+    p_assignee_to: assigneeTo,
   });
   if (error) throw new Error(error.message);
+  {
+    const nm = await employeeNames([employee_id, managerTo, assigneeTo]);
+    const handed = [managerTo && `projects they managed to ${nm.get(managerTo)}`, assigneeTo && `their team work to ${nm.get(assigneeTo)}`].filter(Boolean) as string[];
+    await logActivity({ actor: me, group: "people", action: "employee_deactivated", summary: `${firstName(me.name)} deactivated ${nm.get(employee_id) ?? "an employee"}${handed.length ? `, handing over ${list(handed)}` : ""}` });
+  }
 
   revalidatePath("/");
   revalidatePath("/people");
@@ -318,6 +409,7 @@ export async function reactivateEmployee(formData: FormData) {
 
   const { error } = await supabaseAdmin.from("employees").update({ is_active: true }).eq("id", employee_id);
   if (error) throw new Error(error.message);
+  await logActivity({ actor: me, group: "people", action: "employee_reactivated", summary: `${firstName(me.name)} reactivated ${(await employeeNames([employee_id])).get(employee_id) ?? "an employee"}` });
 
   revalidatePath("/");
   revalidatePath("/people");
@@ -332,7 +424,7 @@ export async function deleteEmployee(formData: FormData) {
   // Safety net: only deactivated people can be deleted, so their open projects were already handed over.
   const { data, error: gErr } = await supabaseAdmin
     .from("employees")
-    .select("is_active")
+    .select("is_active, name")
     .eq("id", employee_id)
     .maybeSingle();
   if (gErr) throw new Error(gErr.message);
@@ -341,6 +433,7 @@ export async function deleteEmployee(formData: FormData) {
 
   const { error } = await supabaseAdmin.from("employees").delete().eq("id", employee_id);
   if (error) throw new Error(error.message);
+  await logActivity({ actor: me, group: "people", action: "employee_deleted", summary: `${firstName(me.name)} permanently deleted the employee ${data.name}` });
 
   revalidatePath("/");
   revalidatePath("/people");
@@ -365,6 +458,13 @@ export async function markPaid(formData: FormData) {
   if (eErr) throw new Error(eErr.message);
 
   const paid_at = new Date().toISOString();
+  const paidInfo = async () => {
+    const [name, { data: row }] = await Promise.all([
+      projectLabel(project_id),
+      supabaseAdmin.from("payment_dues").select("amount_usd").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
+    ]);
+    return { name, amount: usd(row?.amount_usd as number | null) };
+  };
   if (existing) {
     if (existing.status === "paid") return; // already paid, nothing to do
     // Keep the amount the due was opened with; only flip it to paid.
@@ -396,6 +496,8 @@ export async function markPaid(formData: FormData) {
     });
     if (error) throw new Error(error.message);
   }
+  const pi = await paidInfo();
+  await logActivity({ actor: me, group: "payment", action: "payment_paid", projectId: project_id, projectName: pi.name, summary: `${firstName(me.name)} marked the ${pi.amount} payment for ${pi.name} (due ${due_date}) as paid` });
 
   revalidatePath("/");
   revalidatePath("/projects");
@@ -416,6 +518,13 @@ export async function undoPaid(formData: FormData) {
     .eq("project_id", project_id)
     .eq("due_date", due_date);
   if (error) throw new Error(error.message);
+  {
+    const [name, { data: row }] = await Promise.all([
+      projectLabel(project_id),
+      supabaseAdmin.from("payment_dues").select("amount_usd").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
+    ]);
+    await logActivity({ actor: me, group: "payment", action: "payment_unpaid", projectId: project_id, projectName: name, summary: `${firstName(me.name)} put the ${usd(row?.amount_usd as number | null)} payment for ${name} (due ${due_date}) back to unpaid` });
+  }
 
   revalidatePath("/");
   revalidatePath("/projects");
@@ -423,10 +532,11 @@ export async function undoPaid(formData: FormData) {
 
 /** Runs the monthly job for the current month on demand (same code the scheduled job runs). */
 export async function openDuesNow(): Promise<{ ok: boolean; message: string }> {
-  await requirePermission("payments");
+  const { user: me } = await requirePermission("payments");
   try {
     const month = projectionMonths(todayISO(), 1)[0];
     const r = await openDuesForMonth(month);
+    if (r.created > 0) await logActivity({ actor: me, group: "payment", action: "dues_generated", summary: `${firstName(me.name)} generated ${r.created} new ${r.created === 1 ? "due" : "dues"} for ${month.label}` });
     revalidatePath("/");
     revalidatePath("/projects");
     return {
@@ -473,6 +583,7 @@ export async function changeProjectStatus(formData: FormData) {
   if (reasonRequired(status) && reasons.length === 0) throw new Error("Please choose at least one reason.");
 
   // One database step updates the status and writes the history row, so they can't drift apart.
+  const { data: prev } = await supabaseAdmin.from("projects").select("name, status").eq("id", project_id).maybeSingle();
   const { error } = await supabaseAdmin.rpc("set_project_status", {
     p_project: project_id,
     p_status: status,
@@ -480,6 +591,11 @@ export async function changeProjectStatus(formData: FormData) {
     p_reasons: reasons,
   });
   if (error) throw new Error(error.message);
+  {
+    const verb: Record<string, string> = { halted: "halted", completed: "marked as completed", ended: "marked as lost", active: prev?.status === "halted" ? "resumed" : "reopened" };
+    const why = reasons.length ? ` (${list(reasons)})` : note ? ` (${note})` : "";
+    await logActivity({ actor: me, group: "project", action: `status_${status}`, projectId: project_id, projectName: prev?.name as string | undefined, details: { from: prev?.status, to: status, reasons, note: note || undefined }, summary: `${firstName(me.name)} ${verb[status]} ${prev?.name ?? "a project"}${why}` });
+  }
 
   revalidatePath("/");
   revalidatePath("/projects");
@@ -499,6 +615,10 @@ export async function markReportSent(formData: FormData) {
     .from("report_log")
     .upsert({ project_id, due_date }, { onConflict: "project_id,due_date", ignoreDuplicates: true });
   if (error) throw new Error(error.message);
+  {
+    const name = await projectLabel(project_id);
+    await logActivity({ actor: me, group: "report", action: "report_sent", projectId: project_id, projectName: name, summary: `${firstName(me.name)} marked the report for ${name} (due ${due_date}) as sent` });
+  }
 
   revalidatePath("/");
   revalidatePath("/reports");
@@ -516,6 +636,10 @@ export async function undoReportSent(formData: FormData) {
 
   const { error } = await supabaseAdmin.from("report_log").delete().eq("project_id", project_id).eq("due_date", due_date);
   if (error) throw new Error(error.message);
+  {
+    const name = await projectLabel(project_id);
+    await logActivity({ actor: me, group: "report", action: "report_unsent", projectId: project_id, projectName: name, summary: `${firstName(me.name)} put the report for ${name} (due ${due_date}) back to not sent` });
+  }
 
   revalidatePath("/");
   revalidatePath("/reports");
@@ -550,6 +674,10 @@ export async function addNote(formData: FormData) {
     p_author: me.id,
   });
   if (error) throw new Error(error.message);
+  {
+    const name = await projectLabel(project_id);
+    await logActivity({ actor: me, group: "note", action: "note_added", projectId: project_id, projectName: name, summary: `${firstName(me.name)} added ${kind === "onboarding" ? "the onboarding" : `a ${kind}`} note to ${name}` });
+  }
   refreshNotes();
 }
 
@@ -567,6 +695,11 @@ export async function updateNote(formData: FormData) {
     p_editor: me.id,
   });
   if (error) throw new Error(error.message);
+  {
+    const { data: n } = await supabaseAdmin.from("project_notes").select("kind, project_id").eq("id", id).maybeSingle();
+    const name = n ? await projectLabel(n.project_id as string) : "a project";
+    await logActivity({ actor: me, group: "note", action: "note_edited", projectId: (n?.project_id as string | undefined) ?? null, projectName: name, summary: `${firstName(me.name)} edited ${n?.kind === "onboarding" ? "the onboarding" : `a ${n?.kind ?? ""}`} note on ${name}` });
+  }
   refreshNotes();
 }
 
@@ -578,12 +711,16 @@ export async function deleteNote(formData: FormData) {
   if (!id) return;
   await requireNoteAccess(access, id);
 
-  const { data, error: gErr } = await supabaseAdmin.from("project_notes").select("kind").eq("id", id).maybeSingle();
+  const { data, error: gErr } = await supabaseAdmin.from("project_notes").select("kind, project_id").eq("id", id).maybeSingle();
   if (gErr) throw new Error(gErr.message);
   if (!data) return;
   if (data.kind === "onboarding") throw new Error("Onboarding notes can be edited but not deleted.");
 
   const { error } = await supabaseAdmin.from("project_notes").delete().eq("id", id);
   if (error) throw new Error(error.message);
+  {
+    const name = await projectLabel(data.project_id as string);
+    await logActivity({ actor: me, group: "note", action: "note_deleted", projectId: data.project_id as string, projectName: name, summary: `${firstName(me.name)} deleted a ${data.kind} note from ${name}` });
+  }
   refreshNotes();
 }

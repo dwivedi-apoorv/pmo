@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { ActivityIcon, BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +27,7 @@ const PAGES = [
   { title: "Onboarding", href: "/onboarding", icon: UserRoundPlusIcon },
   { title: "Employees", href: "/people", icon: UsersIcon },
   { title: "Insights", href: "/insights", icon: TrendingUpIcon },
+  { title: "Activity", href: "/activity", icon: ActivityIcon },
 ];
 
 export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name: string; email: string }; admin?: boolean; hidden?: string[] }) {

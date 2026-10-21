@@ -21,12 +21,13 @@ export const PERMISSIONS = [
   { key: "manage_people", title: "Manage employees", text: "Add, edit, deactivate and delete employees." },
   { key: "edit_notes", title: "Write project notes", text: "Add and edit notes on the projects they can see." },
   { key: "reports", title: "Reports", text: "Open the Reports page and mark reports as sent." },
+  { key: "view_activity", title: "See the activity log", text: "Who changed what and when. Without 'see every project' they only see activity on their own projects." },
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number]["key"];
 
 export const DEFAULTS: Record<"manager" | "member", Record<Permission, boolean>> = {
-  manager: { view_all_projects: true, payments: true, manage_projects: true, manage_people: false, edit_notes: true, reports: true },
-  member: { view_all_projects: false, payments: false, manage_projects: false, manage_people: false, edit_notes: true, reports: true },
+  manager: { view_all_projects: true, payments: true, manage_projects: true, manage_people: false, edit_notes: true, reports: true, view_activity: false },
+  member: { view_all_projects: false, payments: false, manage_projects: false, manage_people: false, edit_notes: true, reports: true, view_activity: false },
 };
 
 type Matrix = Record<"manager" | "member", Record<Permission, boolean>>;

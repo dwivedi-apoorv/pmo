@@ -2,29 +2,42 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/access";
-import { NOTIFICATION_KINDS, Sender, getMethod, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
+import { firstName, list, logActivity } from "@/lib/activity";
+import { NOTIFICATION_KINDS, Sender, getMethod, getDisabledKinds, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
+const METHOD_LABEL: Record<string, string> = { off: "off", user: "send as the connected account", bot: "the Teams bot", auto: "the bot first, then the account" };
+
 export async function saveMethod(formData: FormData) {
-  await requireAdmin();
+  const me = (await requireAdmin()).user;
   const method = String(formData.get("method") ?? "");
   if (!["off", "user", "bot", "auto"].includes(method)) throw new Error("Choose how messages are sent.");
+  const before = await getMethod();
   await setMethod(method as Method);
+  if (before !== method) await logActivity({ actor: me, group: "settings", action: "delivery_changed", summary: `${firstName(me.name)} changed how Teams messages are sent: ${METHOD_LABEL[before]} → ${METHOD_LABEL[method]}` });
   revalidatePath("/settings");
 }
 
 export async function saveKinds(formData: FormData) {
-  await requireAdmin();
+  const me = (await requireAdmin()).user;
   const on = new Set(formData.getAll("kind").map(String));
-  await setDisabledKinds(NOTIFICATION_KINDS.map((k) => k.key).filter((k) => !on.has(k)));
+  const before = await getDisabledKinds();
+  const off = NOTIFICATION_KINDS.map((k) => k.key).filter((k) => !on.has(k));
+  await setDisabledKinds(off);
+  const turnedOff = NOTIFICATION_KINDS.filter((k) => off.includes(k.key) && !before.has(k.key)).map((k) => k.title);
+  const turnedOn = NOTIFICATION_KINDS.filter((k) => !off.includes(k.key) && before.has(k.key)).map((k) => k.title);
+  if (turnedOff.length || turnedOn.length) {
+    await logActivity({ actor: me, group: "settings", action: "messages_changed", summary: `${firstName(me.name)} changed which Teams messages are sent${turnedOn.length ? `: switched on ${list(turnedOn)}` : ""}${turnedOff.length ? `${turnedOn.length ? ";" : ":"} switched off ${list(turnedOff)}` : ""}` });
+  }
   revalidatePath("/settings");
 }
 
 export async function disconnectMicrosoft() {
-  await requireAdmin();
+  const me = (await requireAdmin()).user;
   const { error } = await supabaseAdmin.from("ms_connection").delete().eq("id", 1);
   if (error) throw new Error(error.message);
   await supabaseAdmin.from("teams_chats").delete().eq("method", "user");
+  await logActivity({ actor: me, group: "settings", action: "microsoft_disconnected", summary: `${firstName(me.name)} disconnected the Microsoft account used to send Teams messages` });
   revalidatePath("/settings");
 }
 

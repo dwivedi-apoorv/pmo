@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const access = await requirePageAccess();
   const user = access.user;
-  const hidden = [...(access.can("payments") ? [] : ["/payments"]), ...(access.can("reports") ? [] : ["/reports"])];
+  const hidden = [...(access.can("payments") ? [] : ["/payments"]), ...(access.can("reports") ? [] : ["/reports"]), ...(access.can("view_activity") ? [] : ["/activity"])];
 
   return (
     <TooltipProvider>

@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 025) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 026) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -836,3 +836,20 @@ select distinct on (status, lower(regexp_replace(btrim(reason), '\s+', ' ', 'g')
 from project_status_log
 where status in ('halted', 'ended', 'completed') and reason is not null and char_length(btrim(reason)) between 1 and 60
 on conflict do nothing;
+
+-- ---- Activity log (migration-026) ----
+create table if not exists activity_log (
+  id           uuid primary key default gen_random_uuid(),
+  created_at   timestamptz not null default now(),
+  actor_id     uuid references employees(id) on delete set null,
+  actor_name   text not null,
+  grp          text not null check (grp in ('project', 'payment', 'report', 'note', 'people', 'access', 'settings')),
+  action       text not null,                       -- e.g. project_created, payment_paid
+  summary      text not null,
+  project_id   uuid references projects(id) on delete set null,
+  project_name text,
+  details      jsonb
+);
+create index if not exists activity_log_time_idx    on activity_log (created_at desc);
+create index if not exists activity_log_project_idx on activity_log (project_id, created_at desc);
+alter table activity_log enable row level security;
