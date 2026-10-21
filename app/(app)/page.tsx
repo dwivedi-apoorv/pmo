@@ -38,7 +38,7 @@ export default async function Home() {
   const { scope } = access;
   const canPay = access.can("payments");
   const month = projectionMonths(todayISO(), 1)[0];
-  const [projectsRes, peopleRes, payments, onboardedRes, changesRes, sendsRes, tagsRes, servicesRes] = await Promise.all([
+  const [projectsRes, peopleRes, payments, statusCountRes, onboardedRes, changesRes, sendsRes, tagsRes, servicesRes] = await Promise.all([
     limitTo(
       supabase
         .from("projects")
@@ -52,6 +52,8 @@ export default async function Home() {
     ).returns<Project[]>(),
     loadPeople(),
     loadPaymentsData({ scope, money: canPay }),
+    // Every project's status (for the cards at the top).
+    limitTo(supabase.from("projects").select("status"), scope, "id").returns<{ status: string }[]>(),
     // Projects onboarded this month, whatever their status now.
     limitTo(supabase.from("projects").select("id", { count: "exact", head: true }).gte("onboarding_date", month.start).lte("onboarding_date", month.end), scope, "id"),
     // Status changes made this month (India time): how many projects were halted or lost (ended).
@@ -69,7 +71,7 @@ export default async function Home() {
     supabase.from("services").select("id, name").order("name").returns<Service[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? onboardedRes.error ?? changesRes.error ?? sendsRes.error ?? tagsRes.error ?? servicesRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? payments.error ?? statusCountRes.error ?? onboardedRes.error ?? changesRes.error ?? sendsRes.error ?? tagsRes.error ?? servicesRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -79,6 +81,8 @@ export default async function Home() {
     );
   }
 
+  const statusCounts = { halted: 0, ended: 0, total: (statusCountRes.data ?? []).length };
+  for (const p of statusCountRes.data ?? []) if (p.status === "halted" || p.status === "ended") statusCounts[p.status]++;
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
   const projects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
   const today = todayISO();
@@ -168,17 +172,24 @@ export default async function Home() {
     <div className="w-full space-y-6 p-4 sm:p-6">
       <PageHeader title="Dashboard" description="An overview of whats happening!" />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]">
-        <Card size="sm">
-          <CardHeader>
-            <CardDescription>
-              <Link href="/projects" className="font-medium text-foreground underline-offset-4 hover:underline">
-                Active projects
-              </Link>
-            </CardDescription>
-            <CardTitle className="text-3xl">{projects.length}</CardTitle>
-          </CardHeader>
-        </Card>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[
+          { label: "Total projects", count: statusCounts.total, href: "/projects?status=all" },
+          { label: "Active projects", count: projects.length, href: "/projects" },
+          { label: "Halted projects", count: statusCounts.halted, href: "/projects?status=halted" },
+          { label: "Completed projects", count: statusCounts.ended, href: "/projects?status=ended" },
+        ].map((c) => (
+          <Card size="sm" key={c.label}>
+            <CardHeader>
+              <CardDescription>
+                <Link href={c.href} className="font-medium text-foreground underline-offset-4 hover:underline">
+                  {c.label}
+                </Link>
+              </CardDescription>
+              <CardTitle className="text-3xl">{c.count}</CardTitle>
+            </CardHeader>
+          </Card>
+        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
