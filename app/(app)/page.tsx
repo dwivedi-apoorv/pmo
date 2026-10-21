@@ -164,10 +164,6 @@ export default async function Home() {
     .sort(byWorkload);
   const withoutManager = projects.filter((p) => !p.project_manager_id).length;
 
-  const managers = peopleRes.people.filter(
-    (e) => e.is_active && e.role?.trim().toLowerCase() === "project manager"
-  );
-
   return (
     <div className="w-full space-y-6 p-4 sm:p-6">
       <PageHeader title="Dashboard" description="An overview of whats happening!" />
@@ -183,20 +179,6 @@ export default async function Home() {
             <CardTitle className="text-3xl">{projects.length}</CardTitle>
           </CardHeader>
         </Card>
-        {managers.map((m) => (
-          <Card size="sm" key={m.id}>
-            <CardHeader>
-              <CardDescription>
-                <Link href={`/projects/${m.slug}`} className="font-medium text-foreground underline-offset-4 hover:underline">
-                  {m.name}
-                </Link>
-              </CardDescription>
-              <CardTitle className="text-3xl">
-                {projects.filter((p) => p.project_manager_id === m.id).length}
-              </CardTitle>
-            </CardHeader>
-          </Card>
-        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
