@@ -40,7 +40,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="w-full space-y-6 p-4 sm:p-6">
-      <PageHeader title="Settings" description="Microsoft Teams notifications" />
+      <PageHeader title="General settings" description="How Microsoft Teams messages are sent" />
 
       {sp.connected && <p role="status" className="rounded-lg border p-3 text-sm">Microsoft account connected.</p>}
       {sp.error && <p role="alert" className="rounded-lg border border-destructive/40 p-3 text-sm text-destructive">{sp.error}</p>}

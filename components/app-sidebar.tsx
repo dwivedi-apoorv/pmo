@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ActivityIcon, BellIcon, BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { useState } from "react";
+import { ActivityIcon, BellIcon, BriefcaseIcon, ChevronDownIcon,  FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +15,9 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { signOut } from "@/app/(auth)/login/actions";
@@ -30,8 +34,18 @@ const PAGES = [
   { title: "Activity", href: "/activity", icon: ActivityIcon },
 ];
 
+// Everything under the "Settings" dropdown (admins only). To add a settings page, add a line here.
+const SETTINGS_PAGES = [
+  { title: "General settings", href: "/settings", icon: SettingsIcon },
+  { title: "Access", href: "/access", icon: ShieldCheckIcon },
+  { title: "Notifications", href: "/notifications", icon: BellIcon },
+];
+
 export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name: string; email: string }; admin?: boolean; hidden?: string[] }) {
   const pathname = usePathname();
+  const inSettings = SETTINGS_PAGES.some((p) => pathname.startsWith(p.href));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const showSettings = settingsOpen || inSettings; // always open while you're on one of its pages
 
   return (
     <Sidebar collapsible="offcanvas">
@@ -45,7 +59,7 @@ export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name:
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {[...PAGES.filter((p) => !hidden.includes(p.href)), ...(admin ? [{ title: "Access", href: "/access", icon: ShieldCheckIcon }, { title: "Notifications", href: "/notifications", icon: BellIcon }, { title: "Settings", href: "/settings", icon: SettingsIcon }] : [])].map((item) => {
+              {PAGES.filter((p) => !hidden.includes(p.href)).map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 return (
                   <SidebarMenuItem key={item.href}>
@@ -56,6 +70,30 @@ export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name:
                   </SidebarMenuItem>
                 );
               })}
+              {admin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={inSettings}
+                    aria-expanded={showSettings}
+                    onClick={() => setSettingsOpen(!showSettings)}
+                  >
+                    <SettingsIcon />
+                    <span>Settings</span>
+                    <ChevronDownIcon className={`ml-auto transition-transform ${showSettings ? "rotate-180" : ""}`} />
+                  </SidebarMenuButton>
+                  {showSettings && (
+                    <SidebarMenuSub>
+                      {SETTINGS_PAGES.map((item) => (
+                        <SidebarMenuSubItem key={item.href}>
+                          <SidebarMenuSubButton isActive={pathname.startsWith(item.href)} render={<Link href={item.href} />}>
+                            <span>{item.title}</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
+                  )}
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
