@@ -69,7 +69,7 @@ export default async function ProjectsPage({
   const canPay = access.can("payments");
   const canManage = access.can("manage_projects");
   const sp = await searchParams;
-  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "reporting";
+  const sort: SortKey = SORT_KEYS.includes(sp.sort as SortKey) ? (sp.sort as SortKey) : "name";
   const dir: "asc" | "desc" = sp.dir === "desc" ? "desc" : "asc";
   const q = (sp.q ?? "").trim();
   const tab: Tab = sp.status === "all" ? "all" : sp.status && isProjectStatus(sp.status) ? sp.status : "active";
