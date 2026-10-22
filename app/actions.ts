@@ -12,6 +12,8 @@ import { isNoteKind } from "@/lib/notes";
 import { requirePermission, requireProject, type Access } from "@/lib/access";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
 import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
+import ExcelJS from "exceljs";
+import { rowFromCells, rowKey, rowToFields, validateRows, type ImportContext, type ImportRow } from "@/lib/import-projects";
 
 const str = (v: FormDataEntryValue | null) => (typeof v === "string" ? v.trim() : "");
 // "" and "none" (the select's "— None —" option) both mean no project manager
@@ -124,6 +126,19 @@ async function setTeam(projectId: string, managerId: string | null, memberIds: s
 
 export async function createProject(formData: FormData) {
   const access = await requirePermission("manage_projects");
+  await createProjectCore(access, formData, { notify: true, log: true, paymentOptional: false });
+  revalidatePath("/payments");
+  revalidatePath("/");
+}
+
+type CreateOptions = {
+  notify: boolean; // tell the new team in Teams
+  log: boolean; // write a line to the activity log
+  paymentOptional: boolean; // a project may be created without a payment plan (bulk import)
+};
+
+/** Creates one project from form-style fields. Shared by the New project form and the Excel import. */
+async function createProjectCore(access: Access, formData: FormData, opts: CreateOptions): Promise<string> {
   const me = access.user;
   const name = str(formData.get("name"));
   const client_name = str(formData.get("client_name"));
@@ -137,7 +152,8 @@ export async function createProject(formData: FormData) {
     throw new Error("Name, client, website, onboarding date and reporting date are required.");
   }
   // Payment details are only read from people who may see payments; for anyone else the project starts without a plan.
-  const payment = access.can("payments") ? parsePayment(formData) : null;
+  const hasPaymentFields = ["payment_date", "payment_term", "payment_method", "payment_amount_usd"].some((k) => str(formData.get(k)));
+  const payment = access.can("payments") && (hasPaymentFields || !opts.paymentOptional) ? parsePayment(formData) : null;
   const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
@@ -180,7 +196,7 @@ export async function createProject(formData: FormData) {
   try {
     await setTeam(data.id, project_manager_id, assignees, onboarding_date);
     const added = newlyAdded({ manager: null, members: new Set() }, project_manager_id, assignees);
-    if (added.length) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
+    if (added.length && opts.notify) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
   } catch (e) {
     throw new Error(
       `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
@@ -191,7 +207,7 @@ export async function createProject(formData: FormData) {
 
   const who = await employeeNames([project_manager_id, ...assignees]);
   const team = assignees.map((id) => who.get(id)).filter((n): n is string => !!n);
-  await logActivity({
+  if (opts.log) await logActivity({
     actor: me,
     group: "project",
     action: "project_created",
@@ -199,9 +215,7 @@ export async function createProject(formData: FormData) {
     projectName: name,
     summary: `${firstName(me.name)} created the project ${name} for ${client_name}${project_manager_id ? `, managed by ${who.get(project_manager_id)}` : ""}${team.length ? `, with ${list(team)}` : ""}`,
   });
-  revalidatePath("/payments");
-
-  revalidatePath("/");
+  return data.id as string;
 }
 
 export async function updateProject(formData: FormData) {
@@ -725,4 +739,133 @@ export async function deleteNote(formData: FormData) {
     await logActivity({ actor: me, group: "note", action: "note_deleted", projectId: data.project_id as string, projectName: name, summary: `${firstName(me.name)} deleted a ${data.kind} note from ${name}` });
   }
   refreshNotes();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Bulk import from Excel: read the file into preview rows, then create the rows that passed the checks.
+// ---------------------------------------------------------------------------------------------------------------
+
+const MAX_IMPORT_ROWS = 500;
+
+async function importContext(access: Access): Promise<ImportContext & { allServices: { id: string; name: string }[] }> {
+  const [emps, svc, projs] = await Promise.all([
+    supabaseAdmin.from("employees").select("id, name, email").eq("is_active", true),
+    supabaseAdmin.from("services").select("id, name"),
+    supabaseAdmin.from("projects").select("name, client_name"),
+  ]);
+  const error = emps.error ?? svc.error ?? projs.error;
+  if (error) throw new Error(error.message);
+  return {
+    employees: (emps.data ?? []) as ImportContext["employees"],
+    services: (svc.data ?? []) as ImportContext["services"],
+    allServices: (svc.data ?? []) as ImportContext["services"],
+    existing: (projs.data ?? []).map((p) => rowKey(p.name as string, p.client_name as string)),
+    canPay: access.can("payments"),
+    today: todayISO(),
+  };
+}
+
+/** Text of an Excel cell, whatever it holds (plain text, a link, formatted text, a formula result). */
+function cellValue(v: ExcelJS.CellValue): unknown {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v;
+  if (typeof v === "object") {
+    const o = v as unknown as Record<string, unknown>;
+    if ("richText" in o) return (o.richText as { text: string }[]).map((t) => t.text).join("");
+    if ("result" in o) return o.result instanceof Date ? o.result : String(o.result ?? "");
+    if ("text" in o) return String(o.text ?? "");
+    return "";
+  }
+  return String(v);
+}
+
+export async function parseProjectsFile(formData: FormData): Promise<{ ok: true; rows: ImportRow[]; blank: number } | { ok: false; error: string }> {
+  try {
+    const access = await requirePermission("manage_projects");
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose an Excel file (.xlsx) first." };
+    if (!/\.xlsx$/i.test(file.name)) return { ok: false, error: "That isn't an .xlsx file. Save the sheet as Excel Workbook (.xlsx) and try again." };
+    if (file.size > 2_000_000) return { ok: false, error: "That file is too large (2 MB at most)." };
+
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await file.arrayBuffer());
+    const ws = wb.getWorksheet("Projects") ?? wb.worksheets[0];
+    if (!ws) return { ok: false, error: "The file has no sheets." };
+
+    const headers: string[] = [];
+    ws.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => (headers[col] = String(cellValue(cell.value) instanceof Date ? "" : cellValue(cell.value)).trim()));
+    if (!headers.some((h) => /project/i.test(h ?? ""))) return { ok: false, error: "Couldn't find a “Project name” column in the first row. Use the template." };
+
+    const ctx = await importContext(access);
+    const rows: ImportRow[] = [];
+    let blank = 0;
+    for (let r = 2; r <= ws.rowCount; r++) {
+      const cells: Record<string, unknown> = {};
+      let any = false;
+      headers.forEach((h, col) => {
+        if (!h) return;
+        const v = cellValue(ws.getRow(r).getCell(col).value);
+        if (v instanceof Date || String(v).trim()) any = true;
+        cells[h] = v;
+      });
+      if (!any) { blank++; continue; }
+      if (rows.length >= MAX_IMPORT_ROWS) return { ok: false, error: `That's more than ${MAX_IMPORT_ROWS} projects. Split the file and import it in parts.` };
+      rows.push(rowFromCells(cells, ctx));
+    }
+    if (rows.length === 0) return { ok: false, error: "The sheet has no projects in it (only the header row)." };
+    return { ok: true, rows, blank };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? `Couldn't read that file. ${e.message}` : "Couldn't read that file." };
+  }
+}
+
+/**
+ * Creates the projects that pass the checks, one at a time, through the same code as the New project form (but
+ * without Teams messages, and with a single line in the activity log). Returns what happened to each row.
+ */
+export async function importProjects(rows: ImportRow[]): Promise<{ ok: boolean; error?: string }[]> {
+  const access = await requirePermission("manage_projects");
+  if (!Array.isArray(rows) || rows.length === 0) return [];
+  if (rows.length > MAX_IMPORT_ROWS) throw new Error(`Import at most ${MAX_IMPORT_ROWS} projects at a time.`);
+
+  const text = (v: unknown) => (typeof v === "string" ? v : "");
+  const list_ = (v: unknown) => (Array.isArray(v) ? v.map(text) : []);
+  const clean: ImportRow[] = rows.map((r) => ({
+    name: text(r.name), client: text(r.client), website: text(r.website), onboarded: text(r.onboarded), reporting: text(r.reporting),
+    services: list_(r.services).map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean), managerId: text(r.managerId), managerRaw: text(r.managerRaw),
+    teamIds: list_(r.teamIds), teamRaw: list_(r.teamRaw), notes: text(r.notes), payDate: text(r.payDate), amount: text(r.amount), term: text(r.term),
+    method: text(r.method), collectedUpTo: text(r.collectedUpTo),
+  }));
+
+  const ctx = await importContext(access);
+  const problems = validateRows(clean, ctx);
+  const results: { ok: boolean; error?: string }[] = [];
+  let created = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const first = Object.values(problems[i])[0];
+    if (first) { results.push({ ok: false, error: first }); continue; }
+    try {
+      const fd = new FormData();
+      for (const f of rowToFields(clean[i], ctx.canPay)) fd.append(f.name, f.value);
+      for (const name of clean[i].services) {
+        const known = ctx.allServices.find((s) => s.name.toLowerCase() === name.toLowerCase());
+        if (known) fd.append("services", known.id);
+        else fd.append("new_services", name);
+      }
+      await createProjectCore(access, fd, { notify: false, log: false, paymentOptional: true });
+      results.push({ ok: true });
+      created++;
+      ctx.existing.push(rowKey(clean[i].name, clean[i].client));
+    } catch (e) {
+      results.push({ ok: false, error: e instanceof Error ? e.message : "Something went wrong." });
+    }
+  }
+
+  if (created > 0) {
+    await logActivity({ actor: access.user, group: "project", action: "projects_imported", summary: `${firstName(access.user.name)} imported ${created} ${created === 1 ? "project" : "projects"} from Excel${created < clean.length ? ` (${clean.length - created} skipped)` : ""}` });
+  }
+  revalidatePath("/projects");
+  revalidatePath("/payments");
+  revalidatePath("/");
+  return results;
 }

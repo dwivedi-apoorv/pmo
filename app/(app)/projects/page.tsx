@@ -27,6 +27,8 @@ import { RiskNote } from "@/components/risk-note";
 import { ProjectStatusMenu } from "@/components/project-status-menu";
 import { PageHeader } from "@/components/page-header";
 import { NewProjectButton } from "@/components/new-project-button";
+import { ImportProjectsDialog } from "@/components/import-projects-dialog";
+import { rowKey } from "@/lib/import-projects";
 import { ColumnsMenu } from "@/components/columns-menu";
 import { SearchBox } from "@/components/search-box";
 import { SortHead } from "@/components/sort-head";
@@ -189,7 +191,20 @@ export default async function ProjectsPage({
       <PageHeader
         title="Projects"
         description="Projects, their teams, reports and payments"
-        action={canManage ? <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} /> : undefined}
+        action={
+          canManage ? (
+            <div className="flex items-center gap-2">
+              <ImportProjectsDialog
+                employees={employees.filter((e) => e.email).map((e) => ({ id: e.id, name: e.name, email: e.email }))}
+                services={servicesRes.data ?? []}
+                existing={allProjects.map((p) => rowKey(p.name, p.client_name))}
+                canPay={canPay}
+                today={todayISO()}
+              />
+              <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} />
+            </div>
+          ) : undefined
+        }
       />
 
       <div className="flex flex-wrap items-center gap-3">
