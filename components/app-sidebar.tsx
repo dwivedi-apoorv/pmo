@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ActivityIcon, BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { ActivityIcon, BellIcon, BriefcaseIcon, FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -45,7 +45,7 @@ export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name:
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {[...PAGES.filter((p) => !hidden.includes(p.href)), ...(admin ? [{ title: "Access", href: "/access", icon: ShieldCheckIcon }, { title: "Settings", href: "/settings", icon: SettingsIcon }] : [])].map((item) => {
+              {[...PAGES.filter((p) => !hidden.includes(p.href)), ...(admin ? [{ title: "Access", href: "/access", icon: ShieldCheckIcon }, { title: "Notifications", href: "/notifications", icon: BellIcon }, { title: "Settings", href: "/settings", icon: SettingsIcon }] : [])].map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
                 return (
                   <SidebarMenuItem key={item.href}>

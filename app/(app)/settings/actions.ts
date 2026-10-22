@@ -29,7 +29,7 @@ export async function saveKinds(formData: FormData) {
   if (turnedOff.length || turnedOn.length) {
     await logActivity({ actor: me, group: "settings", action: "messages_changed", summary: `${firstName(me.name)} changed which Teams messages are sent${turnedOn.length ? `: switched on ${list(turnedOn)}` : ""}${turnedOff.length ? `${turnedOn.length ? ";" : ":"} switched off ${list(turnedOff)}` : ""}` });
   }
-  revalidatePath("/settings");
+  revalidatePath("/notifications");
 }
 
 export async function disconnectMicrosoft() {

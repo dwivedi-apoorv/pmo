@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { requirePageAdmin } from "@/lib/access";
 import { appUrl, botConfigured, userAppConfigured } from "@/lib/ms/config";
-import { NOTIFICATION_KINDS, getConnection, getDisabledKinds, getMethod } from "@/lib/notify/send";
+import { getConnection, getMethod } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { noteDateTime } from "@/lib/notes";
 import { PageHeader } from "@/components/page-header";
@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DisconnectButton, InstallBotButton, TestMessageButton } from "./controls";
-import { saveKinds, saveMethod } from "./actions";
+import { saveMethod } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,13 +30,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   await requirePageAdmin();
   const sp = await searchParams;
 
-  const [method, off, connection, botChats, people, log] = await Promise.all([
+  const [method, connection, botChats, people] = await Promise.all([
     getMethod(),
-    getDisabledKinds(),
     getConnection(),
     supabaseAdmin.from("teams_chats").select("employee_id").eq("method", "bot"),
     supabaseAdmin.from("employees").select("id, name, email").eq("is_active", true).order("name"),
-    supabaseAdmin.from("notification_log").select("id, created_at, employee_name, kind, method, status, detail").order("created_at", { ascending: false }).limit(25),
   ]);
   const botReady = new Set((botChats.data ?? []).map((c) => c.employee_id as string));
 
@@ -63,27 +61,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <span>
                   <span className="block text-sm font-medium">{m.title}</span>
                   <span className="block text-sm text-muted-foreground">{m.text}</span>
-                </span>
-              </label>
-            ))}
-            <div><Button type="submit">Save</Button></div>
-          </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>What gets sent</CardTitle>
-          <CardDescription>Untick anything you don&apos;t want sent. It applies to everyone.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form action={saveKinds} className="grid gap-3">
-            {NOTIFICATION_KINDS.map((k) => (
-              <label key={k.key} className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
-                <input type="checkbox" name="kind" value={k.key} defaultChecked={!off.has(k.key)} className="mt-1" />
-                <span>
-                  <span className="block text-sm font-medium">{k.title}</span>
-                  <span className="block text-sm text-muted-foreground">{k.text}</span>
                 </span>
               </label>
             ))}
@@ -153,31 +130,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <CardDescription>Sends a short message to you, using the method selected above. If it fails, the reason from Microsoft is shown.</CardDescription>
         </CardHeader>
         <CardContent><TestMessageButton /></CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent messages</CardTitle>
-          <CardDescription>The last 25, including anything that failed and why.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(log.data ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing sent yet.</p>
-          ) : (
-            <ul className="divide-y text-sm">
-              {(log.data ?? []).map((l) => (
-                <li key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">
-                  <span className="w-36 shrink-0 text-muted-foreground tabular-nums">{noteDateTime(l.created_at)}</span>
-                  <span className="min-w-0 flex-1 truncate font-medium">{l.employee_name ?? "—"}</span>
-                  <Badge variant="outline">{l.kind}</Badge>
-                  <span className="w-12 text-muted-foreground">{l.method ?? "—"}</span>
-                  <Badge variant={l.status === "sent" ? "secondary" : l.status === "failed" ? "destructive" : "outline"}>{l.status}</Badge>
-                  {l.detail && <span className="basis-full text-xs text-muted-foreground">{l.detail}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
       </Card>
     </div>
   );
