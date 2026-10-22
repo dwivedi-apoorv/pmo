@@ -31,6 +31,8 @@ import { ColumnsMenu } from "@/components/columns-menu";
 import { SearchBox } from "@/components/search-box";
 import { SortHead } from "@/components/sort-head";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
+import { DownloadIcon } from "lucide-react";
 import { AssigneeBadges } from "@/components/assignee-badges";
 import { WebsiteLink } from "@/components/website-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -239,6 +241,13 @@ export default async function ProjectsPage({
           </CardTitle>
           <div className="flex items-center gap-2">
             <SearchBox placeholder="Search project, client, manager…" />
+            <a
+              href={`/api/export/projects?${new URLSearchParams({ status: tab, sort, dir, ...(q ? { q } : {}), ...(serviceFilter ? { service: serviceFilter } : {}), ...(riskOnly ? { risk: "1" } : {}) })}`}
+              className={buttonVariants({ variant: "outline" })}
+              title="Download the projects shown here as an Excel file"
+            >
+              <DownloadIcon /> Export to Excel
+            </a>
             <ColumnsMenu hidden={[...hidden]} />
           </div>
         </CardHeader>
