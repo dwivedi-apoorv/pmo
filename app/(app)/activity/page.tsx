@@ -52,17 +52,17 @@ export default async function ActivityPage({ searchParams }: { searchParams: Pro
     <div className="w-full space-y-6 p-4 sm:p-6">
       <PageHeader title="Activity" description="Who changed what, and when (India time)" />
 
-      <form className="flex flex-wrap items-center gap-2" action="/activity">
-        <input name="q" defaultValue={q} placeholder="Search what happened…" className="h-9 w-full max-w-xs rounded-md border bg-background px-3 text-sm" aria-label="Search" />
-        <select name="who" defaultValue={sp.who ?? ""} className="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Person">
+      <form className="flex flex-wrap items-center gap-3" action="/activity">
+        <input name="q" defaultValue={q} placeholder="Search what happened…" className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-full sm:w-72" aria-label="Search" />
+        <select name="who" defaultValue={sp.who ?? ""} className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-full sm:w-44" aria-label="Person">
           <option value="">Everyone</option>
           {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
-        <select name="type" defaultValue={type ?? ""} className="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Kind of change">
+        <select name="type" defaultValue={type ?? ""} className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 w-full sm:w-44" aria-label="Kind of change">
           <option value="">All kinds</option>
           {groups.map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
         </select>
-        <Button type="submit" variant="outline">Filter</Button>
+        <Button type="submit" variant="outline" className="h-9 px-4">Filter</Button>
         {(q || sp.who || type) && <Link href="/activity" className="text-sm text-muted-foreground underline-offset-4 hover:underline">Clear</Link>}
       </form>
 

@@ -15,7 +15,7 @@ import { createOneOnOneChat, lookupUserId, refreshTokens, sendChatMessage } from
 import { toHtml, toMarkdown, type Notice } from "@/lib/notify/notice";
 
 export type Method = "off" | "user" | "bot" | "auto";
-export type Kind = "digest" | "assigned" | "test";
+export type Kind = "digest" | "assigned" | "test" | "status" | "payment" | "nudge";
 export type Recipient = { id: string; name: string; email: string };
 export type Delivery = { ok: boolean; skipped?: boolean; method?: "user" | "bot"; detail?: string };
 
@@ -33,6 +33,9 @@ export const NOTIFICATION_KINDS = [
   { key: "reports", title: "Reports due", text: "In the daily summary: reports that are due soon or overdue. Goes to the project's manager and its team." },
   { key: "payments", title: "Payments due", text: "In the daily summary: payments that are due soon or overdue. Goes to the project's manager." },
   { key: "assigned", title: "Added to a project", text: "Sent straight away when someone is made manager or team member of a project." },
+  { key: "status_changed", title: "Project halted, completed or lost", text: "Sent straight away to the project's manager and team when its status changes to halted, completed or lost." },
+  { key: "payment_paid", title: "Payment received", text: "Sent to the project's manager when a payment is marked as paid." },
+  { key: "report_nudge", title: "Overdue report reminder", text: "Sent to the project's manager the morning after a report was due and still isn't marked as sent (and again for up to 3 days)." },
   { key: "team_changed", title: "Team or manager changed", text: "Sent to everyone already on a project when its manager or team changes, saying who was added or removed." },
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]["key"];

@@ -1,4 +1,5 @@
 import type { Line, Notice } from "@/lib/notify/notice";
+import type { ProjectStatus } from "@/lib/status";
 
 export type AssignedProject = {
   name: string;
@@ -65,4 +66,49 @@ export function teamChangedNotice(c: TeamChange): Notice {
   lines.push([{ label: "Project Manager now", text: c.newManager ?? "Not assigned" }]);
   lines.push([c.team.length > 1 ? { label: "Team now", text: "", items: c.team } : { label: "Team now", text: c.team[0] ?? "No one" }]);
   return { title: `Team updated: ${c.project}`, sections: [], letter: lines };
+}
+
+const STOPPED: Partial<Record<ProjectStatus, { verb: string; label: string }>> = {
+  halted: { verb: "halted", label: "Halted" },
+  completed: { verb: "marked as completed", label: "Completed" },
+  ended: { verb: "marked as lost", label: "Lost" },
+};
+
+/** Tells the manager and team that a project was halted, completed or lost. */
+export function statusChangedNotice(p: { name: string; client: string; manager: string | null; status: ProjectStatus; reasons: string[]; by: string }): Notice | null {
+  const s = STOPPED[p.status];
+  if (!s) return null;
+  const lines: Line[][] = [
+    [{ text: `Hello, the project ${p.name} has been ${s.verb}.` }],
+    [{ label: "Project Name", text: p.name }, { label: "Client Name", text: p.client }, { label: "Status", text: s.label }],
+  ];
+  if (p.reasons.length > 1) lines.push([{ label: "Reasons", text: "", items: p.reasons }]);
+  else if (p.reasons.length === 1) lines.push([{ label: "Reason", text: p.reasons[0] }]);
+  lines.push([{ label: "Project Manager", text: p.manager ?? "Not assigned" }, { label: "Changed by", text: p.by }]);
+  return { title: `${p.name} ${s.verb}`, sections: [], letter: lines };
+}
+
+/** Tells the manager a payment came in. */
+export function paymentPaidNotice(p: { project: string; client: string; amount: string; due: string; by: string }): Notice {
+  return {
+    title: `Payment received: ${p.project} (due ${p.due})`,
+    sections: [],
+    letter: [
+      [{ text: `Hello, a payment for ${p.project} has been marked as paid.` }],
+      [{ label: "Project Name", text: p.project }, { label: "Client Name", text: p.client }, { label: "Amount", text: p.amount }, { label: "Due date", text: p.due }, { label: "Marked as paid by", text: p.by }],
+    ],
+  };
+}
+
+/** Reminds the manager a report is overdue. */
+export function reportNudgeNotice(p: { project: string; client: string; due: string; daysLate: number }): Notice {
+  return {
+    title: `Report overdue: ${p.project} (due ${p.due})`,
+    sections: [],
+    letter: [
+      [{ text: `Hello, the report for ${p.project} is ${p.daysLate} ${p.daysLate === 1 ? "day" : "days"} overdue.` }],
+      [{ label: "Project Name", text: p.project }, { label: "Client Name", text: p.client }, { label: "Report was due", text: p.due }],
+      [{ text: "Please send it and mark it as sent in the PMO." }],
+    ],
+  };
 }

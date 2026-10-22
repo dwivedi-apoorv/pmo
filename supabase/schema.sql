@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 026) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 027) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -717,7 +717,7 @@ create table notification_log (
   id            uuid primary key default gen_random_uuid(),
   employee_id   uuid references employees(id) on delete set null,
   employee_name text,
-  kind          text not null check (kind in ('digest', 'assigned', 'test')),
+  kind          text not null check (kind in ('digest', 'assigned', 'test', 'status', 'payment', 'nudge')),
   method        text,
   status        text not null check (status in ('sent', 'failed', 'skipped')),
   detail        text,                              -- why it failed or was skipped

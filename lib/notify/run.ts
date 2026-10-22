@@ -4,12 +4,14 @@ import { appUrl } from "@/lib/ms/config";
 import { todayISO } from "@/lib/reporting";
 import type { Due } from "@/lib/dues";
 import type { ReportSend } from "@/lib/reports";
+import { reportAttention } from "@/lib/reports";
 import { buildDigests, type DigestEmployee, type DigestProject } from "@/lib/notify/digest";
 import type { Notice } from "@/lib/notify/notice";
-import { assignedNotice, teamChangedNotice, type AssignedProject } from "@/lib/notify/project";
+import type { ProjectStatus } from "@/lib/status";
+import { assignedNotice, paymentPaidNotice, reportNudgeNotice, statusChangedNotice, teamChangedNotice, type AssignedProject } from "@/lib/notify/project";
 import { Sender, getDisabledKinds, type Recipient } from "@/lib/notify/send";
 
-export type DigestRun = { method: string; people: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
+export type DigestRun = { method: string; people: number; nudged: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
 
 const canMessage = (e: DigestEmployee): e is DigestEmployee & { email: string } => e.is_active && !!e.email;
 
@@ -45,10 +47,37 @@ export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<Di
   });
 
   const sender = await Sender.open();
-  const run: DigestRun = { method: sender.method, people: digests.size, sent: 0, failed: 0, skipped: 0, alreadySent: 0, failures: [] };
+  const run: DigestRun = { method: sender.method, people: digests.size, nudged: 0, sent: 0, failed: 0, skipped: 0, alreadySent: 0, failures: [] };
   if (sender.method === "off") {
     run.skipped = digests.size;
     return run;
+  }
+
+  // Overdue-report reminders go to the manager: the morning after a report was due, and for up to 3 days.
+  if (!(await getDisabledKinds()).has("report_nudge")) {
+    const overdue = reportAttention(
+      projects.filter((p) => p.status === "active"),
+      sendsRes.data ?? [],
+      todayISO()
+    ).filter((r) => r.days < 0 && r.days >= -3);
+    const nudges = overdue.flatMap((r) => {
+      const p = projects.find((x) => x.id === r.project_id);
+      const m = p?.project_manager_id ? employees.find((e) => e.id === p.project_manager_id) : undefined;
+      return p && m && canMessage(m) ? [{ p, m, r, notice: reportNudgeNotice({ project: p.name, client: p.client_name, due: r.due, daysLate: -r.days }) }] : [];
+    });
+    if (nudges.length) {
+      const already = new Set(
+        ((await supabaseAdmin.from("notification_log").select("employee_id, summary").eq("kind", "nudge").eq("status", "sent").in("summary", nudges.map((n) => n.notice.title))).data ?? []).map(
+          (l) => `${l.employee_id}|${l.summary}`
+        )
+      );
+      for (const n of nudges) {
+        if (!opts.force && already.has(`${n.m.id}|${n.notice.title}`)) continue;
+        const result = await sender.send({ id: n.m.id, name: n.m.name, email: n.m.email }, n.notice, "nudge");
+        if (result.ok) run.nudged++;
+        else if (!result.skipped) run.failures.push(`${n.m.name} (reminder): ${result.detail ?? "failed"}`);
+      }
+    }
   }
 
   const todayStart = `${todayISO()}T00:00:00+05:30`;
@@ -164,5 +193,46 @@ export async function notifyTeamChanged(
     }
   } catch (e) {
     console.error("[notify] could not send team-change notices:", e instanceof Error ? e.message : e);
+  }
+}
+
+/** "The project was halted / completed / lost": to the manager and the team. Never throws. */
+export async function notifyStatusChanged(projectId: string, status: ProjectStatus, reasons: string[], actorName: string) {
+  try {
+    if ((await getDisabledKinds()).has("status_changed")) return;
+    const [{ data: project }, { data: team }] = await Promise.all([
+      supabaseAdmin.from("projects").select("name, client_name, project_manager_id").eq("id", projectId).maybeSingle(),
+      supabaseAdmin.from("project_assignments").select("employee_id").eq("project_id", projectId),
+    ]);
+    if (!project) return;
+    const ids = [...new Set([project.project_manager_id as string | null, ...(team ?? []).map((t) => t.employee_id as string)].filter((x): x is string => !!x))];
+    const { data: people } = await supabaseAdmin.from("employees").select("id, name, email, is_active").in("id", ids);
+    const manager = people?.find((p) => p.id === project.project_manager_id)?.name ?? null;
+    const notice = statusChangedNotice({ name: project.name, client: project.client_name, manager, status, reasons, by: actorName });
+    if (!notice) return;
+    const sender = await Sender.open();
+    if (sender.method === "off") return;
+    for (const e of people ?? []) {
+      if (!e.is_active || !e.email) continue;
+      await sender.send({ id: e.id, name: e.name, email: e.email } as Recipient, notice, "status");
+    }
+  } catch (e) {
+    console.error("[notify] could not send status notices:", e instanceof Error ? e.message : e);
+  }
+}
+
+/** "A payment was marked as paid": to the project's manager. Never throws. */
+export async function notifyPaymentPaid(projectId: string, due: string, amount: string, actorName: string) {
+  try {
+    if ((await getDisabledKinds()).has("payment_paid")) return;
+    const { data: project } = await supabaseAdmin.from("projects").select("name, client_name, project_manager_id").eq("id", projectId).maybeSingle();
+    if (!project?.project_manager_id) return;
+    const { data: m } = await supabaseAdmin.from("employees").select("id, name, email, is_active").eq("id", project.project_manager_id).maybeSingle();
+    if (!m?.is_active || !m.email) return;
+    const sender = await Sender.open();
+    if (sender.method === "off") return;
+    await sender.send({ id: m.id, name: m.name, email: m.email } as Recipient, paymentPaidNotice({ project: project.name, client: project.client_name, amount, due, by: actorName }), "payment");
+  } catch (e) {
+    console.error("[notify] could not send payment notice:", e instanceof Error ? e.message : e);
   }
 }

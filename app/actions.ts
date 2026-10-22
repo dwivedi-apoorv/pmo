@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
-import { notifyAssigned, notifyTeamChanged } from "@/lib/notify/run";
+import { notifyAssigned, notifyPaymentPaid, notifyStatusChanged, notifyTeamChanged } from "@/lib/notify/run";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { isPaymentMethod, isPaymentTerm, projectionMonths } from "@/lib/payments";
 import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
@@ -497,6 +497,7 @@ export async function markPaid(formData: FormData) {
     if (error) throw new Error(error.message);
   }
   const pi = await paidInfo();
+  after(() => notifyPaymentPaid(project_id, due_date, pi.amount, me.name));
   await logActivity({ actor: me, group: "payment", action: "payment_paid", projectId: project_id, projectName: pi.name, summary: `${firstName(me.name)} marked the ${pi.amount} payment for ${pi.name} (due ${due_date}) as paid` });
 
   revalidatePath("/");
@@ -593,6 +594,7 @@ export async function changeProjectStatus(formData: FormData) {
   if (error) throw new Error(error.message);
   {
     const verb: Record<string, string> = { halted: "halted", completed: "marked as completed", ended: "marked as lost", active: prev?.status === "halted" ? "resumed" : "reopened" };
+    if (status === "halted" || status === "completed" || status === "ended") after(() => notifyStatusChanged(project_id, status, reasons, me.name));
     const why = reasons.length ? ` (${list(reasons)})` : note ? ` (${note})` : "";
     await logActivity({ actor: me, group: "project", action: `status_${status}`, projectId: project_id, projectName: prev?.name as string | undefined, details: { from: prev?.status, to: status, reasons, note: note || undefined }, summary: `${firstName(me.name)} ${verb[status]} ${prev?.name ?? "a project"}${why}` });
   }

@@ -84,7 +84,7 @@ export default async function AccessPage() {
                       defaultValue={locked ? "admin" : (e.access_role as string)}
                       disabled={locked}
                       aria-label={`Role for ${e.name}`}
-                      className="h-9 rounded-md border bg-background px-2 text-sm"
+                      className="h-9 w-32 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                     >
                       {ROLES.map((r) => <option key={r.value} value={r.value}>{r.title}</option>)}
                     </select>
