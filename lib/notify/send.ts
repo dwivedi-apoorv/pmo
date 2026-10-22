@@ -1,4 +1,5 @@
 import "server-only";
+import { alertAdmins } from "@/lib/alerts";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { decryptSecret, encryptSecret } from "@/lib/crypto";
 import { botConfigured, userAppConfigured } from "@/lib/ms/config";
@@ -15,7 +16,7 @@ import { createOneOnOneChat, lookupUserId, refreshTokens, sendChatMessage } from
 import { toHtml, toMarkdown, type Notice } from "@/lib/notify/notice";
 
 export type Method = "off" | "user" | "bot" | "auto";
-export type Kind = "digest" | "assigned" | "test" | "status" | "payment" | "nudge";
+export type Kind = "digest" | "assigned" | "test" | "status" | "payment" | "nudge" | "alert";
 export type Recipient = { id: string; name: string; email: string };
 export type Delivery = { ok: boolean; skipped?: boolean; method?: "user" | "bot"; detail?: string };
 
@@ -36,6 +37,7 @@ export const NOTIFICATION_KINDS = [
   { key: "status_changed", title: "Project halted, completed or lost", text: "Sent straight away to the project's manager and team when its status changes to halted, completed or lost." },
   { key: "payment_paid", title: "Payment received", text: "Sent to the project's manager when a payment is marked as paid." },
   { key: "report_nudge", title: "Overdue report reminder", text: "Sent to the project's manager the morning after a report was due and still isn't marked as sent (and again for up to 3 days)." },
+  { key: "error_alerts", title: "Error alerts", text: "An email to the admins when the morning job fails or Teams messages can't be delivered, at most once every 6 hours for the same problem." },
   { key: "team_changed", title: "Team or manager changed", text: "Sent to everyone already on a project when its manager or team changes, saying who was added or removed." },
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]["key"];
@@ -180,6 +182,10 @@ export class Sender {
       }
     }
     await log(r, kind, result, notice).catch(() => {});
+    // A real message that couldn't be delivered: tell the admins by email (Teams is what is failing). The morning job reports its own failures with counts.
+    if (!result.ok && !result.skipped && kind !== "test" && kind !== "alert" && kind !== "digest") {
+      await alertAdmins("Teams messages are failing", [`The last failure: "${notice.title}" to ${r.name} (${r.email}) could not be delivered.`, `Why: ${result.detail ?? "unknown"}`]);
+    }
     return result;
   }
 }

@@ -43,3 +43,27 @@ export async function sendLoginCode(to: string, code: string): Promise<void> {
     throw new Error(problem);
   }
 }
+
+/**
+ * Sends a plain email with Resend (same RESEND_API_KEY and RESEND_FROM as the login codes).
+ * Returns what happened instead of throwing, so callers like error alerts can carry on.
+ */
+export async function sendEmail(to: string[], subject: string, text: string): Promise<{ ok: boolean; detail?: string }> {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM;
+  if (!key || !from) {
+    console.log(`\n[email] No email service configured. Would send to ${to.join(", ")}: ${subject}\n${text}\n`);
+    return { ok: false, detail: "RESEND_API_KEY and RESEND_FROM aren't set." };
+  }
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to, subject, text }),
+    });
+    if (!res.ok) return { ok: false, detail: `Resend refused the email (${res.status}). ${(await res.text().catch(() => "")).slice(0, 200)}` };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : "Couldn't reach Resend." };
+  }
+}

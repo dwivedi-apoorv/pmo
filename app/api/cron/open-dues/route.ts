@@ -1,3 +1,4 @@
+import { alertAdmins } from "@/lib/alerts";
 import { openDuesForMonth } from "@/lib/open-dues";
 import { projectionMonths } from "@/lib/payments";
 import { todayISO } from "@/lib/reporting";
@@ -25,6 +26,8 @@ export async function GET(request: Request) {
     const result = await openDuesForMonth(month);
     return Response.json({ ok: true, month: month.key, ...result });
   } catch (e) {
-    return Response.json({ ok: false, error: e instanceof Error ? e.message : "Failed" }, { status: 500 });
+    const message = e instanceof Error ? e.message : "Failed";
+    await alertAdmins("Monthly payment dues job failed", ["The job that opens each month's payments stopped with an error:", message]);
+    return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

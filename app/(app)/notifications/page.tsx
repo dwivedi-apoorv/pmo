@@ -10,7 +10,7 @@ import { saveKinds } from "../settings/actions";
 
 export const dynamic = "force-dynamic";
 
-const KIND_LABEL: Record<string, string> = { digest: "Daily summary", assigned: "Added to project", status: "Status change", payment: "Payment", nudge: "Report reminder", test: "Test" };
+const KIND_LABEL: Record<string, string> = { digest: "Daily summary", assigned: "Added to project", status: "Status change", payment: "Payment", nudge: "Report reminder", alert: "Error alert", test: "Test" };
 const METHOD_LABEL: Record<string, string> = { off: "Off", user: "Sending as the connected account", bot: "Sending from the Teams bot", auto: "Bot first, then the account" };
 
 export default async function NotificationsPage() {
