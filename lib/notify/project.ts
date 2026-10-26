@@ -6,11 +6,14 @@ export type AssignedProject = {
   client_name: string;
   website: string | null;
   onboarding_date: string;
+  reporting_date: string; // reports repeat monthly on this day
   manager: string | null; // name
+  team: string[]; // names of everyone on the team (not counting the manager)
   services: string[];
   onboarding_notes: string | null;
 };
 
+const ordinal = (n: number) => `${n}${["th", "st", "nd", "rd"][n % 100 > 10 && n % 100 < 14 ? 0 : Math.min(n % 10, 4) % 4]}`;
 const date = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
 /** A usable web address (adds https:// if it was typed without), or null when it isn't one. */
@@ -41,6 +44,8 @@ export function assignedNotice(p: AssignedProject): Notice {
       field("Onboarded on", date(p.onboarding_date)),
       [services],
       field("Project Manager", p.manager ?? "Not assigned"),
+      [p.team.length > 1 ? { label: "Team", text: "", items: p.team } : { label: "Team", text: p.team[0] ?? "No one else yet" }],
+      [{ text: `Reports will be discussed with the client on the ${ordinal(Number(p.reporting_date.slice(8, 10)))} of every month.` }],
       field("Onboarding Notes", p.onboarding_notes?.trim() || "None yet"),
     ],
   };
