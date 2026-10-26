@@ -6,11 +6,12 @@ import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RunDigestButton } from "@/components/run-digest-button";
 import { saveKinds } from "../settings/actions";
 
 export const dynamic = "force-dynamic";
 
-const KIND_LABEL: Record<string, string> = { digest: "Daily summary", assigned: "Added to project", status: "Status change", payment: "Payment", nudge: "Report reminder", alert: "Error alert", test: "Test" };
+const KIND_LABEL: Record<string, string> = { digest: "Morning summary", assigned: "Added to project", status: "Status change", payment: "Payment", nudge: "Report reminder", alert: "Error alert", test: "Test" };
 const METHOD_LABEL: Record<string, string> = { off: "Off", user: "Sending as the connected account", bot: "Sending from the Teams bot", auto: "Bot first, then the account" };
 
 export default async function NotificationsPage() {
@@ -27,6 +28,17 @@ export default async function NotificationsPage() {
       <p className="text-sm text-muted-foreground">
         Delivery is currently <span className="font-medium text-foreground">{METHOD_LABEL[method]}</span>. Change it in Settings.
       </p>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Morning summary</CardTitle>
+          <CardDescription>
+            Sent automatically around 9:00 AM India time (the scheduler can be up to an hour late). Each run adds a &quot;Morning job&quot; line to Recent messages below, even when there was nothing to send. If a morning
+            went by with no line, the job didn&apos;t run. You can run it now: anyone who already got today&apos;s summary won&apos;t get it twice.
+          </CardDescription>
+        </CardHeader>
+        <CardContent><RunDigestButton /></CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

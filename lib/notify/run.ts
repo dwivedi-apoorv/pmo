@@ -15,11 +15,48 @@ export type DigestRun = { method: string; people: number; nudged: number; sent: 
 
 const canMessage = (e: DigestEmployee): e is DigestEmployee & { email: string } => e.is_active && !!e.email;
 
+/** One line in the Notifications log saying the morning job ran and what it did, so a quiet day can be told apart from a day it never ran. */
+export async function logRun(run: DigestRun | { error: string }) {
+  try {
+    const failed = "error" in run || run.failed > 0;
+    const detail =
+      "error" in run
+        ? `The morning job stopped with an error: ${run.error}`
+        : run.method === "off"
+          ? "Delivery is switched off in General settings, so nothing was sent."
+          : run.people === 0 && run.nudged === 0
+            ? "Nobody has a report or payment that needs attention today, so no messages were needed."
+            : `${run.sent} summaries sent, ${run.nudged} report reminders, ${run.failed} failed, ${run.alreadySent} already sent today.`;
+    await supabaseAdmin.from("notification_log").insert({
+      kind: "digest",
+      employee_name: "Morning job",
+      method: "error" in run ? null : run.method,
+      status: failed ? "failed" : "error" in run || run.method === "off" || (run.sent === 0 && run.nudged === 0) ? "skipped" : "sent",
+      detail,
+      summary: "Morning job ran",
+    });
+  } catch {
+    // logging must never stop the job
+  }
+}
+
+/** Sends today's summaries and reminders, and records that the job ran. */
+export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<DigestRun> {
+  try {
+    const run = await runDigestInner(opts);
+    await logRun(run);
+    return run;
+  } catch (e) {
+    await logRun({ error: e instanceof Error ? e.message : "Failed" });
+    throw e;
+  }
+}
+
 /**
  * Sends each person's daily summary (only people who have something to act on). A person gets at most
  * one summary per day: running it again the same day skips whoever already got theirs, unless `force`.
  */
-export async function runDailyDigest(opts: { force?: boolean } = {}): Promise<DigestRun> {
+async function runDigestInner(opts: { force?: boolean }): Promise<DigestRun> {
   const [projectsRes, ledgerRes, sendsRes, employeesRes] = await Promise.all([
     supabaseAdmin
       .from("projects")

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/access";
+import { runDailyDigest } from "@/lib/notify/run";
 import { firstName, list, logActivity } from "@/lib/activity";
 import { NOTIFICATION_KINDS, Sender, getMethod, getDisabledKinds, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -76,4 +77,21 @@ export async function sendTestMessage(toEmail?: string): Promise<Delivery & { me
 
 export async function currentMethod() {
   return getMethod();
+}
+
+/** Runs the morning job now (the same one the scheduler runs): handy when a morning message didn't arrive. */
+export async function runDigestNow(): Promise<{ ok: boolean; message: string }> {
+  await requireAdmin();
+  try {
+    const r = await runDailyDigest();
+    revalidatePath("/notifications");
+    if (r.method === "off") return { ok: false, message: "Delivery is switched off in General settings, so nothing was sent." };
+    if (r.people === 0 && r.nudged === 0) return { ok: true, message: "Nobody has a report or payment that needs attention today, so there was nothing to send." };
+    const parts = [`${r.sent} ${r.sent === 1 ? "summary" : "summaries"} sent`, `${r.nudged} report ${r.nudged === 1 ? "reminder" : "reminders"}`];
+    if (r.alreadySent) parts.push(`${r.alreadySent} already had theirs today`);
+    if (r.failed) parts.push(`${r.failed} failed`);
+    return { ok: r.failed === 0, message: `${parts.join(", ")}.${r.failures.length ? "\n" + r.failures.slice(0, 5).join("\n") : ""}` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
 }
