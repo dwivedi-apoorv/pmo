@@ -131,7 +131,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <CardHeader>
           <CardTitle>Project group chats</CardTitle>
           <CardDescription>
-            A Teams group chat for a project, with its manager and team, named &quot;Project (Client)&quot;. The project details are posted in it as the first message. It is created by the connected Microsoft
+            A Teams group chat for a project, with its manager and team, named in capitals after the project&apos;s website without the https:// (for example ACME.COM), or &quot;PROJECT (CLIENT)&quot; if it has no website. The project details are posted in it as the first message. It is created by the connected Microsoft
             account, which joins every chat. A project only ever gets one. You can also make one for any project from the ⋯ menu on the Projects page.
           </CardDescription>
         </CardHeader>

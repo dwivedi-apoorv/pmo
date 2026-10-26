@@ -18,6 +18,12 @@ export async function setAutoProjectChat(on: boolean) {
   if (error) throw new Error(error.message);
 }
 
+/** The chat's name, in capitals: the project's website without "https://" (and any trailing slash), or "Project (Client)" if it has none. */
+export function chatName(p: { name: string; client_name: string; website: string | null }): string {
+  const site = (p.website ?? "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  return (site || `${p.name} (${p.client_name})`).toUpperCase();
+}
+
 export type ChatResult = { ok: boolean; message: string; webUrl?: string | null; created?: boolean };
 
 /**
@@ -48,7 +54,7 @@ async function createProjectChatInner(projectId: string, by: { id: string; name:
 
     const [details, { data: project }, { data: team }] = await Promise.all([
       loadAssignedDetails(projectId),
-      supabaseAdmin.from("projects").select("name, client_name, project_manager_id").eq("id", projectId).maybeSingle(),
+      supabaseAdmin.from("projects").select("name, client_name, website, project_manager_id").eq("id", projectId).maybeSingle(),
       supabaseAdmin.from("project_assignments").select("employee_id").eq("project_id", projectId),
     ]);
     if (!details || !project) return { ok: false, message: "Project not found." };
@@ -73,7 +79,8 @@ async function createProjectChatInner(projectId: string, by: { id: string; name:
       return { ok: false, message: `A group chat needs at least 3 people including the connected account, and only ${memberIds.size} could be found.${note}` };
     }
 
-    const chat = await createGroupChat(account.token, `${project.name} (${project.client_name})`, [...memberIds]);
+    const title = chatName(project as { name: string; client_name: string; website: string | null });
+    const chat = await createGroupChat(account.token, title, [...memberIds]);
     if (!chat.ok || !chat.data?.id) return { ok: false, message: `Teams wouldn't create the chat. ${chat.error ?? ""}`.trim() };
 
     await supabaseAdmin.from("project_chats").upsert({ project_id: projectId, chat_id: chat.data.id, web_url: chat.data.webUrl ?? null });
@@ -85,7 +92,7 @@ async function createProjectChatInner(projectId: string, by: { id: string; name:
       ok: true,
       created: true,
       webUrl: chat.data.webUrl ?? null,
-      message: `Created the Teams chat “${project.name} (${project.client_name})” with ${memberIds.size} people.${welcome.ok ? "" : ` The first message couldn't be posted: ${welcome.error}`}${note}`,
+      message: `Created the Teams chat “${title}” with ${memberIds.size} people.${welcome.ok ? "" : ` The first message couldn't be posted: ${welcome.error}`}${note}`,
     };
   } catch (e) {
     console.error("[chat] could not create the project chat:", e instanceof Error ? e.message : e);
