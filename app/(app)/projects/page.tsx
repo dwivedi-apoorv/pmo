@@ -280,8 +280,8 @@ export default async function ProjectsPage({
                 {show("payment") && canPay && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="payment">Next payment</SortHead>}
                 {show("manager") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="manager">Project manager</SortHead>}
                 {show("assigned") && <SortHead basePath="/projects" sort={sort} dir={dir} q={q} extra={extra} k="assigned">Assigned to</SortHead>}
-                {show("notes") && <TableHead className="sticky right-24 z-[1] border-l bg-card">Notes</TableHead>}
-                <TableHead className="sticky right-0 z-[1] w-24 min-w-24 border-l bg-card text-right">Actions</TableHead>
+                {show("notes") && <TableHead className={`sticky ${canManage ? "right-24" : "right-0"} z-[1] border-l bg-card`}>Notes</TableHead>}
+                {canManage && <TableHead className="sticky right-0 z-[1] w-24 min-w-24 border-l bg-card text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -387,7 +387,7 @@ export default async function ProjectsPage({
                       </TableCell>
                     )}
                     {show("notes") && (
-                      <TableCell className="sticky right-24 z-[1] border-l bg-card">
+                      <TableCell className={`sticky ${canManage ? "right-24" : "right-0"} z-[1] border-l bg-card`}>
                         <OnboardingNotesButton
                           projectId={p.id}
                           projectName={p.name}
@@ -396,7 +396,7 @@ export default async function ProjectsPage({
                         />
                       </TableCell>
                     )}
-                    <TableCell className="sticky right-0 z-[1] w-24 min-w-24 border-l bg-card text-right">
+                    {canManage && <TableCell className="sticky right-0 z-[1] w-24 min-w-24 border-l bg-card text-right">
                       <div className="flex items-center justify-end gap-1">
                       {canManage && <EditProjectDialog
                         showPayment={canPay}
@@ -424,13 +424,13 @@ export default async function ProjectsPage({
                       />}
                       {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} canDelete={access.role === "admin"} />}
                       </div>
-                    </TableCell>
+                    </TableCell>}
                   </TableRow>
                 );
               })}
               {visible.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={2 + COLUMNS.length - hidden.size + (showStatus ? 1 : 0)} className="text-center text-muted-foreground">
+                  <TableCell colSpan={1 + (canManage ? 1 : 0) + COLUMNS.length - hidden.size + (showStatus ? 1 : 0)} className="text-center text-muted-foreground">
                     {q ? `No projects match “${q}”.` : riskOnly ? "No projects are at risk." : tab === "all" ? "No projects yet." : `No ${STATUS_LABEL[tab].toLowerCase()} projects.`}
                   </TableCell>
                 </TableRow>
