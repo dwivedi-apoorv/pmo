@@ -1,5 +1,6 @@
 import "server-only";
 import { firstName, logActivity } from "@/lib/activity";
+import { alertAdmins } from "@/lib/alerts";
 import { createGroupChat, lookupUserId, sendChatMessage } from "@/lib/ms/user";
 import { toHtml } from "@/lib/notify/notice";
 import { assignedNotice } from "@/lib/notify/project";
@@ -20,11 +21,27 @@ export async function setAutoProjectChat(on: boolean) {
 export type ChatResult = { ok: boolean; message: string; webUrl?: string | null; created?: boolean };
 
 /**
- * Makes a Teams group chat for a project: the project manager and team, plus the connected Microsoft account,
+ * Makes a Teams group chat for a project (and says so in the Activity log, or says why it couldn't, so a chat that
+ * was meant to be created automatically but wasn't can be found out and fixed). Never throws.
+ */
+export async function createProjectChat(projectId: string, by: { id: string; name: string } | null): Promise<ChatResult> {
+  const r = await createProjectChatInner(projectId, by);
+  if (!r.ok && by) {
+    const name = (await supabaseAdmin.from("projects").select("name").eq("id", projectId).maybeSingle()).data?.name as string | undefined;
+    await logActivity({ actor: by, group: "project", action: "chat_failed", projectId, projectName: name, summary: `The Teams group chat for ${name ?? "a project"} could not be created: ${r.message}` });
+    await alertAdmins("Teams group chats are failing", [`The group chat for ${name ?? "a project"} could not be created.`, r.message]);
+  } else if (r.ok && r.created && /couldn't be posted/.test(r.message) && by) {
+    await logActivity({ actor: by, group: "project", action: "chat_welcome_failed", projectId, summary: `The group chat was created but its first message was not posted. ${r.message}` });
+  }
+  return r;
+}
+
+/**
+ * The work of making the chat: the project manager and team, plus the connected Microsoft account,
  * named "Project (Client)", with the project details posted as the first message. A project only ever gets one;
  * asking again returns the existing chat. Never throws.
  */
-export async function createProjectChat(projectId: string, by: { id: string; name: string } | null): Promise<ChatResult> {
+async function createProjectChatInner(projectId: string, by: { id: string; name: string } | null): Promise<ChatResult> {
   try {
     const { data: existing } = await supabaseAdmin.from("project_chats").select("web_url").eq("project_id", projectId).maybeSingle();
     if (existing) return { ok: true, created: false, webUrl: existing.web_url as string | null, message: "This project already has a Teams chat." };
