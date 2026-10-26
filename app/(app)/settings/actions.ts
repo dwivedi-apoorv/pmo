@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/access";
 import { runDailyDigest } from "@/lib/notify/run";
+import { createProjectChat, getAutoProjectChat, setAutoProjectChat } from "@/lib/notify/project-chat";
 import { firstName, list, logActivity } from "@/lib/activity";
 import { NOTIFICATION_KINDS, Sender, getMethod, getDisabledKinds, setDisabledKinds, setMethod, setUpBotFor, type Delivery, type Method } from "@/lib/notify/send";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -94,4 +95,43 @@ export async function runDigestNow(): Promise<{ ok: boolean; message: string }> 
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
   }
+}
+
+/** Switches on or off the automatic Teams group chat for every new project. */
+export async function saveProjectChatSetting(formData: FormData) {
+  const me = (await requireAdmin()).user;
+  const on = formData.get("auto") === "on";
+  const before = await getAutoProjectChat();
+  await setAutoProjectChat(on);
+  if (before !== on) {
+    await logActivity({ actor: me, group: "settings", action: "project_chat_setting", summary: `${firstName(me.name)} ${on ? "switched on" : "switched off"} creating a Teams group chat for every new project` });
+  }
+  revalidatePath("/settings");
+}
+
+/** Makes chats for active projects that don't have one yet, a batch at a time (each takes a few seconds). */
+export async function createChatsForExistingProjects(): Promise<{ ok: boolean; message: string }> {
+  const me = (await requireAdmin()).user;
+  const BATCH = 15;
+  const [{ data: projects }, { data: have }] = await Promise.all([
+    supabaseAdmin.from("projects").select("id, name").eq("status", "active").order("name"),
+    supabaseAdmin.from("project_chats").select("project_id"),
+  ]);
+  const haveSet = new Set((have ?? []).map((h) => h.project_id as string));
+  const todo = (projects ?? []).filter((p) => !haveSet.has(p.id as string));
+  if (todo.length === 0) return { ok: true, message: "Every active project already has a Teams chat." };
+
+  let made = 0;
+  const problems: string[] = [];
+  for (const p of todo.slice(0, BATCH)) {
+    const r = await createProjectChat(p.id as string, me);
+    if (r.ok) made++;
+    else problems.push(`${p.name}: ${r.message}`);
+  }
+  const left = todo.length - Math.min(todo.length, BATCH);
+  revalidatePath("/projects");
+  return {
+    ok: problems.length === 0,
+    message: `Created ${made} ${made === 1 ? "chat" : "chats"}.${left ? ` ${left} more projects still have none: press the button again.` : ""}${problems.length ? `\n${problems.slice(0, 6).join("\n")}` : ""}`,
+  };
 }

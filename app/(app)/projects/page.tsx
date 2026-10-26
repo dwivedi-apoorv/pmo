@@ -82,7 +82,7 @@ export default async function ProjectsPage({
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
 
-  const [projectsRes, peopleRes, ledgerRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
+  const [projectsRes, peopleRes, ledgerRes, chatsRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
     limitTo(
       supabase
         .from("projects")
@@ -97,6 +97,7 @@ export default async function ProjectsPage({
     canPay
       ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
       : Promise.resolve({ data: [] as Due[], error: null }),
+    limitTo(supabase.from("project_chats").select("project_id, web_url"), scope).returns<{ project_id: string; web_url: string | null }[]>(),
     supabase.from("status_reasons").select("status, name").order("name").returns<{ status: "halted" | "ended" | "completed"; name: string }[]>(),
     limitTo(supabase.from("project_status_log").select("project_id, status, reason, changed_at").order("changed_at", { ascending: false }), scope).returns<StatusLogRow[]>(),
     limitTo(supabase.from("project_team_history").select("id, project_id, employee_id, employee_name, role, started_on, ended_on"), scope).returns<TeamPeriod[]>(),
@@ -106,7 +107,7 @@ export default async function ProjectsPage({
     supabase.from("project_note_versions").select(VERSION_COLUMNS).order("saved_at", { ascending: false }).returns<NoteVersion[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? reasonsRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? reasonsRes.error ?? chatsRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -117,6 +118,7 @@ export default async function ProjectsPage({
   }
 
   const ledger = ledgerRes.data ?? [];
+  const chatByProject = new Map((chatsRes.data ?? []).map((c) => [c.project_id, c.web_url]));
   const reasonLists: Record<"halted" | "ended" | "completed", string[]> = { halted: [], ended: [], completed: [] };
   for (const r of reasonsRes.data ?? []) reasonLists[r.status].push(r.name);
   const everyoneById = new Map(peopleRes.people.map((e) => [e.id, e]));
@@ -422,7 +424,7 @@ export default async function ProjectsPage({
                         notes={(notesRes.data ?? []).filter((n) => n.project_id === p.id)}
                         noteVersions={versionsFor(p.id)}
                       />}
-                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} canDelete={access.role === "admin"} />}
+                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} canDelete={access.role === "admin"} hasChat={chatByProject.has(p.id)} chatUrl={chatByProject.get(p.id) ?? null} />}
                       </div>
                     </TableCell>}
                   </TableRow>

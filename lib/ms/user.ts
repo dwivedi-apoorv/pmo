@@ -72,5 +72,9 @@ const member = (userId: string) => ({
 export const createOneOnOneChat = (token: string, senderId: string, recipientId: string) =>
   msRequest<{ id: string }>(`${GRAPH}/chats`, { token, json: { chatType: "oneOnOne", members: [member(senderId), member(recipientId)] } });
 
+/** A group chat for several people (the sending account must be among them). Microsoft returns the chat's id and a link to open it. */
+export const createGroupChat = (token: string, topic: string, memberIds: string[]) =>
+  msRequest<{ id: string; webUrl?: string }>(`${GRAPH}/chats`, { token, json: { chatType: "group", topic: topic.slice(0, 250), members: memberIds.map(member) } });
+
 export const sendChatMessage = (token: string, chatId: string, html: string) =>
   msRequest(`${GRAPH}/chats/${encodeURIComponent(chatId)}/messages`, { token, json: { body: { contentType: "html", content: html } } });

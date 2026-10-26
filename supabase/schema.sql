@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 028) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 029) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -853,3 +853,14 @@ create table if not exists activity_log (
 create index if not exists activity_log_time_idx    on activity_log (created_at desc);
 create index if not exists activity_log_project_idx on activity_log (project_id, created_at desc);
 alter table activity_log enable row level security;
+
+-- ---- Teams group chat per project (migration-029) ----
+create table if not exists project_chats (
+  project_id uuid primary key references projects(id) on delete cascade,
+  chat_id    text not null,
+  web_url    text,
+  created_at timestamptz not null default now()
+);
+alter table project_chats enable row level security;   -- no policies: only the server can use it
+
+alter table notification_settings add column if not exists project_chat_auto boolean not null default false;

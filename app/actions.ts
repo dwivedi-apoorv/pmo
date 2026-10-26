@@ -11,6 +11,8 @@ import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
 import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
 import { sendEmail } from "@/lib/email";
+import { createProjectChat, getAutoProjectChat } from "@/lib/notify/project-chat";
+import { getMethod } from "@/lib/notify/send";
 import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
 import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
@@ -199,6 +201,12 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
     await setTeam(data.id, project_manager_id, assignees, onboarding_date);
     const added = newlyAdded({ manager: null, members: new Set() }, project_manager_id, assignees);
     if (added.length && opts.notify) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
+    if (opts.notify) {
+      after(async () => {
+        // The Teams group chat for the project, if that's switched on in General settings.
+        if ((await getAutoProjectChat()) && (await getMethod()) !== "off") await createProjectChat(data.id, me);
+      });
+    }
   } catch (e) {
     throw new Error(
       `The project was saved, but assigning the team failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to assign them.`
@@ -946,6 +954,19 @@ export async function deleteProject(input: { projectId: string; typedName: strin
     revalidatePath("/payments");
     revalidatePath("/onboarding");
     return { ok: true, message: `${summary.name} was deleted.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** "Create Teams chat" on a project: a group chat with its manager and team (or the existing one). */
+export async function createProjectChatNow(projectId: string): Promise<{ ok: boolean; message: string; webUrl?: string | null }> {
+  try {
+    const access = await requirePermission("manage_projects");
+    requireProject(access, projectId);
+    const r = await createProjectChat(projectId, access.user);
+    revalidatePath("/projects");
+    return r;
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
   }

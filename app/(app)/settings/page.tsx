@@ -9,7 +9,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DisconnectButton, InstallBotButton, TestMessageButton } from "./controls";
-import { saveMethod } from "./actions";
+import { saveMethod, saveProjectChatSetting } from "./actions";
+import { CreateChatsButton } from "@/components/create-chats-button";
+import { getAutoProjectChat } from "@/lib/notify/project-chat";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +32,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   await requirePageAdmin();
   const sp = await searchParams;
 
-  const [method, connection, botChats, people] = await Promise.all([
+  const [method, autoChat, connection, botChats, people] = await Promise.all([
     getMethod(),
+    getAutoProjectChat(),
     getConnection(),
     supabaseAdmin.from("teams_chats").select("employee_id").eq("method", "bot"),
     supabaseAdmin.from("employees").select("id, name, email").eq("is_active", true).order("name"),
@@ -123,6 +126,32 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Project group chats</CardTitle>
+          <CardDescription>
+            A Teams group chat for a project, with its manager and team, named &quot;Project (Client)&quot;. The project details are posted in it as the first message. It is created by the connected Microsoft
+            account, which joins every chat. A project only ever gets one. You can also make one for any project from the ⋯ menu on the Projects page.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <form action={saveProjectChatSetting} className="grid gap-3">
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+              <input type="checkbox" name="auto" defaultChecked={autoChat} className="mt-1" />
+              <span>
+                <span className="block text-sm font-medium">Create a group chat automatically when a project is created</span>
+                <span className="block text-sm text-muted-foreground">Needs a connected Microsoft account. Projects added by Excel import don&apos;t get one automatically, and nothing is created while delivery is Off.</span>
+              </span>
+            </label>
+            <div><Button type="submit">Save</Button></div>
+          </form>
+          <div className="border-t pt-4">
+            <p className="mb-2 text-sm text-muted-foreground">For projects that already exist (15 at a time):</p>
+            <CreateChatsButton />
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

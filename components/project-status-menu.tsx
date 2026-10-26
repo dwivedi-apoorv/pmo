@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CheckCircle2Icon, CircleStopIcon, MoreHorizontalIcon, Trash2Icon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleStopIcon, MessagesSquareIcon, MoreHorizontalIcon, Trash2Icon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,7 +22,7 @@ import { ReasonPicker } from "@/components/reason-picker";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { reasonRequired, type ProjectStatus } from "@/lib/status";
-import { changeProjectStatus } from "@/app/actions";
+import { changeProjectStatus, createProjectChatNow } from "@/app/actions";
 
 // What each move does, in the words shown to the user.
 const MOVES: Record<
@@ -85,15 +85,20 @@ export function ProjectStatusMenu({
   status,
   reasons,
   canDelete = false,
+  chatUrl = null,
+  hasChat = false,
 }: {
   id: string;
   name: string;
   status: ProjectStatus;
   reasons: Record<"halted" | "ended" | "completed", string[]>;
   canDelete?: boolean; // admins only
+  chatUrl?: string | null; // the project's Teams chat, if it has one
+  hasChat?: boolean;
 }) {
   const [move, setMove] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [chatMessage, setChatMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -140,6 +145,25 @@ export function ProjectStatusMenu({
               {MOVES[key].menu}
             </DropdownMenuItem>
           ))}
+          <DropdownMenuSeparator />
+          {hasChat && chatUrl ? (
+            <DropdownMenuItem render={<a href={chatUrl} target="_blank" rel="noreferrer" />}>
+              <MessagesSquareIcon />
+              Open Teams chat
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() =>
+                startTransition(async () => {
+                  const r = await createProjectChatNow(id);
+                  setChatMessage(r.message);
+                })
+              }
+            >
+              <MessagesSquareIcon />
+              {hasChat ? "Teams chat exists" : "Create Teams chat"}
+            </DropdownMenuItem>
+          )}
           {canDelete && (
             <>
               <DropdownMenuSeparator />
@@ -151,6 +175,14 @@ export function ProjectStatusMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      <Dialog open={chatMessage !== null} onOpenChange={(o) => !o && setChatMessage(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Teams chat for “{name}”</DialogTitle>
+            <DialogDescription className="whitespace-pre-wrap">{chatMessage}</DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
       {canDelete && <DeleteProjectDialog id={id} name={name} open={deleting} onOpenChange={setDeleting} />}
 
       <Dialog open={move !== null} onOpenChange={(o) => !o && close()}>

@@ -91,6 +91,11 @@ export class Sender {
     return new Sender(await getMethod());
   }
 
+  /** The connected account's sign-in (access token and id), or why there isn't one. */
+  async account() {
+    return this.session();
+  }
+
   // ---- send as the connected account ----
   private async session() {
     if (this.userSession) return this.userSession;

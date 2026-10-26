@@ -142,6 +142,32 @@ async function runDigestInner(opts: { force?: boolean }): Promise<DigestRun> {
   return run;
 }
 
+/** Everything the "new project" message says about a project, as it is right now. null if the project is gone. */
+export async function loadAssignedDetails(projectId: string): Promise<AssignedProject | null> {
+  const [{ data: project }, { data: onboarding }, { data: svc }, { data: team }] = await Promise.all([
+    supabaseAdmin
+      .from("projects")
+      .select("name, client_name, website, onboarding_date, reporting_date, project_manager_id")
+      .eq("id", projectId)
+      .maybeSingle(),
+    supabaseAdmin.from("project_notes").select("body").eq("project_id", projectId).eq("kind", "onboarding").maybeSingle(),
+    supabaseAdmin.from("project_services").select("services(name)").eq("project_id", projectId),
+    supabaseAdmin.from("project_assignments").select("employees(name)").eq("project_id", projectId),
+  ]);
+  if (!project) return null;
+  const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
+  const managerName = project.project_manager_id
+    ? (await supabaseAdmin.from("employees").select("name").eq("id", project.project_manager_id).maybeSingle()).data?.name ?? null
+    : null;
+  return {
+    ...(project as any),
+    manager: managerName,
+    team: (team ?? []).map((t: any) => one<{ name: string }>(t.employees)?.name).filter((n): n is string => !!n).sort(),
+    onboarding_notes: (onboarding?.body as string | undefined) ?? null,
+    services: (svc ?? []).map((t: any) => one<{ name: string }>(t.services)?.name).filter((n): n is string => !!n).sort(),
+  };
+}
+
 /** "You've been added to X": sent to everyone newly added as manager or team member (including whoever made the change). Never throws (a Teams problem must not break saving). */
 export async function notifyAssigned(
   projectId: string,
@@ -151,29 +177,11 @@ export async function notifyAssigned(
     if ((await getDisabledKinds()).has("assigned")) return;
     const who = added;
     if (!who.length) return;
-    const [{ data: project }, { data: people }, { data: onboarding }, { data: svc }, { data: team }] = await Promise.all([
-      supabaseAdmin
-        .from("projects")
-        .select("name, client_name, website, onboarding_date, reporting_date, project_manager_id")
-        .eq("id", projectId)
-        .maybeSingle(),
+    const [details, { data: people }] = await Promise.all([
+      loadAssignedDetails(projectId),
       supabaseAdmin.from("employees").select("id, name, email, is_active").in("id", who.map((w) => w.employeeId)),
-      supabaseAdmin.from("project_notes").select("body").eq("project_id", projectId).eq("kind", "onboarding").maybeSingle(),
-      supabaseAdmin.from("project_services").select("services(name)").eq("project_id", projectId),
-      supabaseAdmin.from("project_assignments").select("employees(name)").eq("project_id", projectId),
     ]);
-    if (!project) return;
-    const one = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
-    const managerName = project.project_manager_id
-      ? (await supabaseAdmin.from("employees").select("name").eq("id", project.project_manager_id).maybeSingle()).data?.name ?? null
-      : null;
-    const details: AssignedProject = {
-      ...(project as any),
-      manager: managerName,
-      team: (team ?? []).map((t: any) => one<{ name: string }>(t.employees)?.name).filter((n): n is string => !!n).sort(),
-      onboarding_notes: (onboarding?.body as string | undefined) ?? null,
-      services: (svc ?? []).map((t: any) => one<{ name: string }>(t.services)?.name).filter((n): n is string => !!n).sort(),
-    };
+    if (!details) return;
     const sender = await Sender.open();
     if (sender.method === "off") return;
     for (const w of who) {
