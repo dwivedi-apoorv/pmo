@@ -422,7 +422,7 @@ export default async function ProjectsPage({
                         notes={(notesRes.data ?? []).filter((n) => n.project_id === p.id)}
                         noteVersions={versionsFor(p.id)}
                       />}
-                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} />}
+                      {canManage && <ProjectStatusMenu id={p.id} name={p.name} status={p.status} reasons={reasonLists} canDelete={access.role === "admin"} />}
                       </div>
                     </TableCell>
                   </TableRow>

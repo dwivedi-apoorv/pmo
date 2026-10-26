@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CheckCircle2Icon, CircleStopIcon, MoreHorizontalIcon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleStopIcon, MoreHorizontalIcon, Trash2Icon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -19,6 +19,8 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ReasonPicker } from "@/components/reason-picker";
+import { DeleteProjectDialog } from "@/components/delete-project-dialog";
+import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { reasonRequired, type ProjectStatus } from "@/lib/status";
 import { changeProjectStatus } from "@/app/actions";
 
@@ -82,13 +84,16 @@ export function ProjectStatusMenu({
   name,
   status,
   reasons,
+  canDelete = false,
 }: {
   id: string;
   name: string;
   status: ProjectStatus;
   reasons: Record<"halted" | "ended" | "completed", string[]>;
+  canDelete?: boolean; // admins only
 }) {
   const [move, setMove] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -135,8 +140,18 @@ export function ProjectStatusMenu({
               {MOVES[key].menu}
             </DropdownMenuItem>
           ))}
+          {canDelete && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
+                <Trash2Icon />
+                Delete Project…
+              </DropdownMenuItem>
+            </>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
+      {canDelete && <DeleteProjectDialog id={id} name={name} open={deleting} onOpenChange={setDeleting} />}
 
       <Dialog open={move !== null} onOpenChange={(o) => !o && close()}>
         <DialogContent className="sm:max-w-md">

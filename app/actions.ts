@@ -9,7 +9,9 @@ import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
 import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
-import { requirePermission, requireProject, type Access } from "@/lib/access";
+import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
+import { sendEmail } from "@/lib/email";
+import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
 import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
 import ExcelJS from "exceljs";
@@ -868,4 +870,83 @@ export async function importProjects(rows: ImportRow[]): Promise<{ ok: boolean; 
   revalidatePath("/payments");
   revalidatePath("/");
   return results;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Permanently deleting a project (admins only): a warning with what will go, the project's name typed back, and a
+// one-time code emailed to the admin. The code is made for this one project, so a login code can't be used here.
+// ---------------------------------------------------------------------------------------------------------------
+
+const deleteCodeHash = (email: string, projectId: string, code: string) => hashCode(email, `delete:${projectId}:${code}`);
+
+/** What deleting this project would remove, for the warning. */
+export async function getDeleteSummary(projectId: string): Promise<{ ok: true; name: string; client: string; payments: number; paid: number; paidTotal: string; reports: number; notes: number; statusChanges: number; teamHistory: number; activity: number } | { ok: false; error: string }> {
+  try {
+    await requireAdmin();
+    const count = async (table: string, col = "project_id") => (await supabaseAdmin.from(table).select("*", { count: "exact", head: true }).eq(col, projectId)).count ?? 0;
+    const [{ data: p }, { data: dues }, reports, notes, statusChanges, teamHistory, activity] = await Promise.all([
+      supabaseAdmin.from("projects").select("name, client_name").eq("id", projectId).maybeSingle(),
+      supabaseAdmin.from("payment_dues").select("amount_usd, status").eq("project_id", projectId),
+      count("report_log"), count("project_notes"), count("project_status_log"), count("project_team_history"), count("activity_log"),
+    ]);
+    if (!p) return { ok: false, error: "Project not found." };
+    const paid = (dues ?? []).filter((d) => d.status === "paid");
+    return {
+      ok: true, name: p.name as string, client: p.client_name as string, payments: (dues ?? []).length, paid: paid.length,
+      paidTotal: formatUSD(paid.reduce((sum, d) => sum + Number(d.amount_usd ?? 0), 0)), reports, notes, statusChanges, teamHistory, activity,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** Emails the admin a code that allows deleting this one project. */
+export async function requestDeleteCode(projectId: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { user } = await requireAdmin();
+    const { data: p } = await supabaseAdmin.from("projects").select("name").eq("id", projectId).maybeSingle();
+    if (!p) return { ok: false, message: "Project not found." };
+    const code = generateCode();
+    const { data, error } = await supabaseAdmin.rpc("login_issue_code", { p_email: user.email, p_code_hash: deleteCodeHash(user.email, projectId, code), p_ip: null });
+    if (error) return { ok: false, message: "Something went wrong. Please try again." };
+    if (data === "limited") return { ok: false, message: "A code was just sent. Wait a minute before asking for another." };
+    if (data !== "sent") return { ok: false, message: "Couldn't send a code to your account." };
+    const sent = await sendEmail([user.email], `[PMO] Code to delete ${p.name}: ${code}`, `Your code to permanently delete the project "${p.name}" is ${code}\n\nIt works once and expires in 10 minutes. If you did not ask to delete a project, ignore this email and make sure nobody else has access to your account.\n`);
+    if (!sent.ok && process.env.NODE_ENV === "production") return { ok: false, message: `We couldn't send the email. ${sent.detail ?? ""}` };
+    return { ok: true, message: `We emailed a 6-digit code to ${user.email}. It expires in 10 minutes.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** Deletes the project and everything linked to it, once the name and the emailed code are right. */
+export async function deleteProject(input: { projectId: string; typedName: string; code: string; eraseActivity: boolean }): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { user } = await requireAdmin();
+    const summary = await getDeleteSummary(input.projectId);
+    if (!summary.ok) return { ok: false, message: summary.error };
+    if (input.typedName.trim() !== summary.name) return { ok: false, message: "The name you typed doesn't match the project's name." };
+    const code = input.code.replace(/\s/g, "");
+    if (!isCodeShape(code)) return { ok: false, message: "Enter the 6-digit code from the email." };
+
+    const { data: who, error: cErr } = await supabaseAdmin.rpc("login_check_code", { p_email: user.email, p_code_hash: deleteCodeHash(user.email, input.projectId, code) });
+    if (cErr) return { ok: false, message: "Something went wrong. Please try again." };
+    if (!who) return { ok: false, message: "That code is wrong or has expired. Ask for a new one if needed." };
+
+    if (input.eraseActivity) await supabaseAdmin.from("activity_log").delete().eq("project_id", input.projectId);
+    const { error } = await supabaseAdmin.from("projects").delete().eq("id", input.projectId);
+    if (error) return { ok: false, message: error.message };
+
+    await logActivity({
+      actor: user, group: "project", action: "project_deleted", projectName: summary.name,
+      summary: `${firstName(user.name)} permanently deleted the project ${summary.name} (${summary.client}), with ${summary.payments} ${summary.payments === 1 ? "payment" : "payments"}, ${summary.reports} report ${summary.reports === 1 ? "record" : "records"} and ${summary.notes} ${summary.notes === 1 ? "note" : "notes"}${input.eraseActivity ? ", and erased its earlier activity" : ""}`,
+    });
+    revalidatePath("/");
+    revalidatePath("/projects");
+    revalidatePath("/payments");
+    revalidatePath("/onboarding");
+    return { ok: true, message: `${summary.name} was deleted.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
 }
