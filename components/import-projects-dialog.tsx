@@ -50,7 +50,7 @@ function Chip({ children, onRemove, bad }: { children: React.ReactNode; onRemove
   );
 }
 
-export function ImportProjectsDialog({ employees, services, existing, canPay, today }: Omit<ImportContext, never> & { today: string }) {
+export function ImportProjectsDialog({ employees, services, existing, canPay, currencies, today }: Omit<ImportContext, never> & { today: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<ImportRow[] | null>(null);
@@ -60,7 +60,7 @@ export function ImportProjectsDialog({ employees, services, existing, canPay, to
   const fileRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState<Record<number, string>>({});
 
-  const ctx: ImportContext = useMemo(() => ({ employees, services, existing, canPay, today }), [employees, services, existing, canPay, today]);
+  const ctx: ImportContext = useMemo(() => ({ employees, services, existing, canPay, currencies, today }), [employees, services, existing, canPay, currencies, today]);
   const errors: RowErrors[] = useMemo(() => (rows ? validateRows(rows, ctx) : []), [rows, ctx]);
   const ready = errors.filter((e) => Object.keys(e).length === 0).length;
   const serviceNames = new Set(services.map((s) => s.name.toLowerCase()));
@@ -145,7 +145,7 @@ export function ImportProjectsDialog({ employees, services, existing, canPay, to
                 <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
                   <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground">
                     <tr>
-                      {["#", "Project", "Client", "Website", "Onboarded", "Reporting", "Services", "Manager", "Team", "Onboarding notes", ...(canPay ? ["First payment", "Amount (USD)", "Term", "Method", "Collected up to"] : []), "Status", ""].map((h) => (
+                      {["#", "Project", "Client", "Website", "Onboarded", "Reporting", "Services", "Manager", "Team", "Onboarding notes", ...(canPay ? ["First payment", "Amount", "Currency", "Term", "Method", "Collected up to"] : []), "Status", ""].map((h) => (
                         <th key={h} className="whitespace-nowrap border-b px-2 py-2 font-medium">{h}</th>
                       ))}
                     </tr>
@@ -217,6 +217,21 @@ export function ImportProjectsDialog({ employees, services, existing, canPay, to
                             <>
                               <td className="min-w-36 border-b px-1 py-1.5"><Text type="date" value={r.payDate} error={e.payDate} onChange={(v) => update(i, { payDate: v })} /></td>
                               <td className="min-w-28 border-b px-1 py-1.5"><Text value={r.amount} error={e.amount} placeholder="500" onChange={(v) => update(i, { amount: v })} /></td>
+                              <td className="min-w-28 border-b px-1 py-1.5">
+                                <select
+                                  value={currencies.includes(r.currency) ? r.currency : "__new__"}
+                                  title={e.currency}
+                                  onChange={(ev) => update(i, { currency: ev.target.value === "__new__" ? "" : ev.target.value })}
+                                  className={`${FIELD} ${e.currency ? BAD : ""}`}
+                                  aria-label="Currency"
+                                >
+                                  {currencies.map((c) => <option key={c} value={c}>{c}</option>)}
+                                  <option value="__new__">＋ Add…</option>
+                                </select>
+                                {!currencies.includes(r.currency) && (
+                                  <input value={r.currency} maxLength={3} placeholder="e.g. GBP" aria-label="New currency code" onChange={(ev) => update(i, { currency: ev.target.value.toUpperCase() })} className={`${FIELD} mt-1 uppercase ${e.currency ? BAD : ""}`} />
+                                )}
+                              </td>
                               <td className="min-w-32 border-b px-1 py-1.5">
                                 <select value={TERMS.some((t) => t.value === r.term) ? r.term : ""} title={e.term} onChange={(ev) => update(i, { term: ev.target.value })} className={`${FIELD} ${e.term ? BAD : ""}`} aria-label="Payment term">
                                   <option value="">{r.term && !TERMS.some((t) => t.value === r.term) ? `“${r.term}”: pick…` : "—"}</option>

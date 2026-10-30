@@ -41,13 +41,13 @@ export async function GET(request: Request) {
   const [projectsRes, people, ledgerRes, sendsRes, logRes, notesRes] = await Promise.all([
     limitTo(
       supabase.from("projects").select(
-        "id, name, client_name, website, onboarding_date, reporting_date, created_at, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd, project_assignments(employees(name)), project_services(services(id, name))"
+        "id, name, client_name, website, onboarding_date, reporting_date, created_at, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd, currency, project_assignments(employees(name)), project_services(services(id, name))"
       ),
       scope,
       "id"
     ).returns<Row[]>(),
     loadPeople(),
-    canPay ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>() : Promise.resolve({ data: [] as Due[], error: null }),
+    canPay ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at"), scope).returns<Due[]>() : Promise.resolve({ data: [] as Due[], error: null }),
     limitTo(supabase.from("report_log").select("project_id, due_date, sent_at"), scope).returns<ReportSend[]>(),
     limitTo(supabase.from("project_status_log").select("project_id, status, reason, changed_at").order("changed_at", { ascending: false }), scope).returns<{ project_id: string; status: string; reason: string | null; changed_at: string }[]>(),
     limitTo(supabase.from("project_notes").select("project_id, body").eq("kind", "onboarding"), scope).returns<{ project_id: string; body: string }[]>(),
@@ -92,7 +92,7 @@ export async function GET(request: Request) {
   });
 
   const headers = ["Project", "Client", "Website", "Status", "Status since", "Status reason", "Services", "Onboarded", "Report day", "Next report", "Project manager", "Team", "Onboarding notes",
-    ...(canPay ? ["Payment amount (USD)", "Payment term", "Payment method", "First payment", "Next payment", "Overdue since"] : [])];
+    ...(canPay ? ["Payment amount", "Currency", "Payment term", "Payment method", "First payment", "Next payment", "Overdue since"] : [])];
   const rows: Cell[][] = picked.map((p) => {
     const change = lastChange.get(p.id);
     const isActive = p.status === "active";
@@ -105,7 +105,7 @@ export async function GET(request: Request) {
       nameOf.get(p.project_manager_id ?? "") ?? null, team(p).join(", "), notes.get(p.id) ?? null,
     ];
     if (!canPay) return base;
-    return [...base, p.payment_amount_usd === null ? null : Number(p.payment_amount_usd), termLabel(p.payment_term) || null, methodLabel(p.payment_method) || null,
+    return [...base, p.payment_amount_usd === null ? null : Number(p.payment_amount_usd), p.payment_amount_usd === null ? null : (p.currency || "USD"), termLabel(p.payment_term) || null, methodLabel(p.payment_method) || null,
       dateCell(p.payment_date), isActive ? dateCell(nextPaymentDate(p)) : null, dateCell(overdueSince({ ...p, active: isActive }, ledger, today))];
   });
 

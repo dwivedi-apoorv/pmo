@@ -3,7 +3,8 @@ import { supabase } from "@/lib/supabase";
 import { limitTo, requirePageAccess } from "@/lib/access";
 import { loadPeople } from "@/lib/people";
 import { addDays, todayISO } from "@/lib/reporting";
-import { formatUSD, projectionMonths, type PaymentPlan } from "@/lib/payments";
+import { formatTotals, sumByCurrency } from "@/lib/currency";
+import { projectionMonths, type PaymentPlan } from "@/lib/payments";
 import { attentionRows, monthItems } from "@/lib/dues";
 import { loadPaymentsData } from "@/lib/payments-data";
 import { reportAttention, type ReportSend } from "@/lib/reports";
@@ -43,7 +44,7 @@ export default async function Home() {
       supabase
         .from("projects")
         .select(
-          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
+          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, currency, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
         )
         .eq("status", "active")
         .order("reporting_date", { ascending: true }),
@@ -107,7 +108,7 @@ export default async function Home() {
   const { active, ledger, info, labelOf } = payments;
   const attention = attentionRows(active, ledger);
   const overdueRows = attention.filter((r) => r.days < 0);
-  const overdueTotal = overdueRows.reduce((sum, r) => sum + r.amount, 0);
+  const overdueTotal = sumByCurrency(overdueRows, (r) => r);
   const SHOWN = 3;
 
   // At risk: an ACTIVE project with an overdue report or an overdue payment.
@@ -129,8 +130,8 @@ export default async function Home() {
   const lost = (changesRes.data ?? []).filter((c) => c.status === "ended").length;
   const completed = (changesRes.data ?? []).filter((c) => c.status === "completed").length;
   const monthRows = monthItems(month, active, ledger, labelOf);
-  const monthExpected = monthRows.reduce((sum, it) => sum + it.amount, 0);
-  const monthReceived = monthRows.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
+  const monthExpected = sumByCurrency(monthRows, (it) => it);
+  const monthReceived = sumByCurrency(monthRows.filter((it) => it.paid), (it) => it);
 
   // Services: how many active projects (and clients) each service is on.
   const servicesByProject = new Map<string, Service[]>();
@@ -325,7 +326,7 @@ export default async function Home() {
               <span className="ml-2 text-sm font-normal text-muted-foreground">{attention.length}</span>
               {overdueRows.length > 0 && (
                 <Badge variant="destructive" className="ml-2 align-middle">
-                  {overdueRows.length} overdue · {formatUSD(overdueTotal)}
+                  {overdueRows.length} overdue · {formatTotals(overdueTotal)}
                 </Badge>
               )}
             </CardTitle>

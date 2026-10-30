@@ -1,3 +1,4 @@
+import { formatMoney } from "@/lib/currency";
 import { addDays, lastOccurrenceOnOrBefore, nextOccurrence, todayISO } from "@/lib/reporting";
 
 export const PAYMENT_TERMS = [
@@ -39,7 +40,8 @@ export type PaymentPlan = {
   payment_date: string | null;
   payment_term: PaymentTerm | null;
   payment_method: PaymentMethod | null;
-  payment_amount_usd: number | null;
+  payment_amount_usd: number | null; // in the project's currency (the column keeps its old name)
+  currency?: string | null; // USD unless the project is billed in another currency
 };
 
 /** Next payment due on/after today, or null (no plan, or a one-off that has passed). */
@@ -52,8 +54,7 @@ export function nextPaymentDate(p: Pick<PaymentPlan, "payment_date" | "payment_t
 /** How many days ahead a payment shows as "due soon". Manual methods need lead time. */
 export const paymentWindowDays = (method: PaymentMethod | null) => (method === "subscription" ? 3 : 7);
 
-export const formatUSD = (n: number | null) =>
-  n === null ? "" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+export const formatUSD = (n: number | null) => formatMoney(n, "USD");
 
 /** The most recent payment date before today and the next one on/after today (either can be null). */
 export function paymentSchedule(

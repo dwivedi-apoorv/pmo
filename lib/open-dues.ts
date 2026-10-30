@@ -15,7 +15,7 @@ import { addDays, todayISO } from "@/lib/reporting";
 export async function openDuesForMonth(month: { start: string; end: string }) {
   const { data: projects, error } = await supabaseAdmin
     .from("projects")
-    .select("id, payment_date, payment_term, payment_method, payment_amount_usd")
+    .select("id, payment_date, payment_term, payment_method, payment_amount_usd, currency")
     .eq("status", "active")
     .not("payment_date", "is", null);
   if (error) throw new Error(error.message);
@@ -40,6 +40,7 @@ export async function openDuesForMonth(month: { start: string; end: string }) {
       project_id: p.id as string,
       due_date,
       amount_usd: (p.payment_amount_usd as number | null) ?? 0,
+      currency: (p.currency as string | null) ?? "USD",
       term: p.payment_term as string | null,
       method: p.payment_method as string | null,
       status: "due" as const,
@@ -77,6 +78,7 @@ export async function backfillPaidPayments(projectId: string, plan: PaymentPlan,
     project_id: projectId,
     due_date,
     amount_usd: plan.payment_amount_usd ?? 0,
+    currency: plan.currency || "USD",
     term: plan.payment_term,
     method: plan.payment_method,
     status: "due" as const,
@@ -87,6 +89,7 @@ export async function backfillPaidPayments(projectId: string, plan: PaymentPlan,
     project_id: projectId,
     due_date,
     amount_usd: plan.payment_amount_usd ?? 0,
+    currency: plan.currency || "USD",
     term: plan.payment_term,
     method: plan.payment_method,
     status: "paid" as const,

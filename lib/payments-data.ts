@@ -14,12 +14,12 @@ export async function loadPaymentsData(opts: { scope?: string[] | null; money?: 
   const money = opts.money ?? true;
   const [projectsRes, ledgerRes] = await Promise.all([
     limitTo(
-      supabase.from("projects").select("id, name, client_name, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd"),
+      supabase.from("projects").select("id, name, client_name, status, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd, currency"),
       scope,
       "id"
     ).returns<PlanRow[]>(),
     money
-      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
+      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at"), scope).returns<Due[]>()
       : Promise.resolve({ data: [] as Due[], error: null }),
   ]);
 

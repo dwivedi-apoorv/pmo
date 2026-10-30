@@ -54,7 +54,7 @@ export async function GET() {
   add("Team members (emails)", "Optional. Emails of active employees, separated by commas.");
   add("Onboarding notes", "Optional.");
   if (canPay) {
-    add("First payment date, Amount, Term, Method", "Leave all four empty for no payment plan, or fill in all four. Term and Method have a dropdown.");
+    add("First payment date, Amount, Term, Method", "Leave all four empty for no payment plan, or fill in all four. Term and Method have a dropdown. Amounts are in USD unless you choose another currency for the row in the preview after uploading.");
     add("Payments collected up to", "Optional. If earlier payments were already collected, the date they were collected up to. They are recorded as paid.");
   }
   add("", "");

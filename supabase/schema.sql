@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 029) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 030) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -864,3 +864,14 @@ create table if not exists project_chats (
 alter table project_chats enable row level security;   -- no policies: only the server can use it
 
 alter table notification_settings add column if not exists project_chat_auto boolean not null default false;
+
+-- ---- More than one currency (migration-030) ----
+create table if not exists currencies (
+  code       text primary key check (code ~ '^[A-Z]{3}$'),   -- ISO code, e.g. USD, CAD
+  created_at timestamptz not null default now()
+);
+alter table currencies enable row level security;   -- no policies: only the server can use it
+insert into currencies (code) values ('USD'), ('CAD') on conflict do nothing;
+
+alter table projects     add column if not exists currency text not null default 'USD' references currencies(code) on update cascade;
+alter table payment_dues add column if not exists currency text not null default 'USD' references currencies(code) on update cascade;

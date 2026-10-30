@@ -15,7 +15,8 @@ import { createProjectChat, getAutoProjectChat } from "@/lib/notify/project-chat
 import { getMethod } from "@/lib/notify/send";
 import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
-import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
+import { formatMoney, DEFAULT_CURRENCY, formatTotals, addTo, normalizeCurrency, type Totals } from "@/lib/currency";
+import { methodLabel, termLabel } from "@/lib/payments";
 import ExcelJS from "exceljs";
 import { rowFromCells, rowKey, rowToFields, validateRows, type ImportContext, type ImportRow } from "@/lib/import-projects";
 
@@ -63,7 +64,9 @@ function parsePayment(formData: FormData) {
   if (!amountRaw || !Number.isFinite(amount) || amount < 0) {
     throw new Error("Enter a valid payment amount in USD.");
   }
-  return { payment_date, payment_term, payment_method, payment_amount_usd: Math.round(amount * 100) / 100 };
+  const currency = normalizeCurrency(str(formData.get("currency")) || DEFAULT_CURRENCY);
+  if (!currency) throw new Error("Choose a valid currency, for example USD or CAD.");
+  return { payment_date, payment_term, payment_method, payment_amount_usd: Math.round(amount * 100) / 100, currency };
 }
 
 /** Who is on a project right now: used to tell people when they have just been added. */
@@ -78,7 +81,13 @@ async function currentTeam(projectId: string) {
   };
 }
 
-const usd = (n: number | null) => (n === null || n === undefined ? "none" : formatUSD(Number(n)));
+const money = (n: number | null, currency?: string | null) => (n === null || n === undefined ? "none" : formatMoney(Number(n), currency));
+
+/** Makes sure a currency is in the list (a new one typed on a form joins it, like a new service). */
+async function ensureCurrency(code: string) {
+  const { error } = await supabaseAdmin.from("currencies").upsert({ code }, { onConflict: "code", ignoreDuplicates: true });
+  if (error) throw new Error(error.message);
+}
 async function projectLabel(id: string) {
   const { data } = await supabaseAdmin.from("projects").select("name").eq("id", id).maybeSingle();
   return (data?.name as string | undefined) ?? "a project";
@@ -161,6 +170,9 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
   const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
+  const currency = normalizeCurrency(str(formData.get("currency")) || DEFAULT_CURRENCY);
+  if (!currency) throw new Error("Choose a valid currency, for example USD or CAD.");
+  if (access.can("payments")) await ensureCurrency(currency);
   const { data, error } = await supabaseAdmin
     .from("projects")
     .insert({
@@ -169,6 +181,7 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
+      ...(access.can("payments") ? { currency } : {}),
       ...(payment ?? {}),
     })
     .select("id")
@@ -247,9 +260,10 @@ export async function updateProject(formData: FormData) {
   const backfillUntil = payment ? parseBackfill(formData, payment.payment_date) : null;
   if (serviceCount(formData) === 0) throw new Error("Choose at least one service.");
 
+  if (payment) await ensureCurrency(payment.currency);
   const { data: old } = await supabaseAdmin
     .from("projects")
-    .select("name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd")
+    .select("name, client_name, website, onboarding_date, reporting_date, payment_date, payment_term, payment_method, payment_amount_usd, currency")
     .eq("id", project_id)
     .maybeSingle();
   const servicesOf = async () =>
@@ -325,7 +339,8 @@ export async function updateProject(formData: FormData) {
 
   if (old && payment) {
     const pc: string[] = [];
-    if (Number(old.payment_amount_usd) !== payment.payment_amount_usd) pc.push(`amount ${usd(old.payment_amount_usd)} → ${usd(payment.payment_amount_usd)}`);
+    if (Number(old.payment_amount_usd) !== payment.payment_amount_usd) pc.push(`amount ${money(old.payment_amount_usd, old.currency)} → ${money(payment.payment_amount_usd, payment.currency)}`);
+    if ((old.currency ?? "USD") !== payment.currency) pc.push(`currency ${old.currency ?? "USD"} → ${payment.currency}`);
     if (old.payment_term !== payment.payment_term) pc.push(`term ${termLabel(old.payment_term) || "none"} → ${termLabel(payment.payment_term)}`);
     if (old.payment_method !== payment.payment_method) pc.push(`method ${methodLabel(old.payment_method) || "none"} → ${methodLabel(payment.payment_method)}`);
     if (old.payment_date !== payment.payment_date) pc.push(`first payment ${shown(old.payment_date)} → ${payment.payment_date}`);
@@ -485,9 +500,9 @@ export async function markPaid(formData: FormData) {
   const paidInfo = async () => {
     const [name, { data: row }] = await Promise.all([
       projectLabel(project_id),
-      supabaseAdmin.from("payment_dues").select("amount_usd").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
+      supabaseAdmin.from("payment_dues").select("amount_usd, currency").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
     ]);
-    return { name, amount: usd(row?.amount_usd as number | null) };
+    return { name, amount: money(row?.amount_usd as number | null, row?.currency as string | null) };
   };
   if (existing) {
     if (existing.status === "paid") return; // already paid, nothing to do
@@ -502,7 +517,7 @@ export async function markPaid(formData: FormData) {
     // The monthly job hasn't opened this payment yet: record it from the project's plan, as paid.
     const { data: project, error: pErr } = await supabaseAdmin
       .from("projects")
-      .select("payment_amount_usd, payment_term, payment_method")
+      .select("payment_amount_usd, currency, payment_term, payment_method")
       .eq("id", project_id)
       .maybeSingle();
     if (pErr) throw new Error(pErr.message);
@@ -512,6 +527,7 @@ export async function markPaid(formData: FormData) {
       project_id,
       due_date,
       amount_usd: project.payment_amount_usd ?? 0,
+      currency: project.currency ?? "USD",
       term: project.payment_term,
       method: project.payment_method,
       status: "paid",
@@ -546,9 +562,9 @@ export async function undoPaid(formData: FormData) {
   {
     const [name, { data: row }] = await Promise.all([
       projectLabel(project_id),
-      supabaseAdmin.from("payment_dues").select("amount_usd").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
+      supabaseAdmin.from("payment_dues").select("amount_usd, currency").eq("project_id", project_id).eq("due_date", due_date).maybeSingle(),
     ]);
-    await logActivity({ actor: me, group: "payment", action: "payment_unpaid", projectId: project_id, projectName: name, summary: `${firstName(me.name)} put the ${usd(row?.amount_usd as number | null)} payment for ${name} (due ${due_date}) back to unpaid` });
+    await logActivity({ actor: me, group: "payment", action: "payment_unpaid", projectId: project_id, projectName: name, summary: `${firstName(me.name)} put the ${money(row?.amount_usd as number | null, row?.currency as string | null)} payment for ${name} (due ${due_date}) back to unpaid` });
   }
 
   revalidatePath("/");
@@ -769,6 +785,7 @@ async function importContext(access: Access): Promise<ImportContext & { allServi
     employees: (emps.data ?? []) as ImportContext["employees"],
     services: (svc.data ?? []) as ImportContext["services"],
     allServices: (svc.data ?? []) as ImportContext["services"],
+    currencies: [],
     existing: (projs.data ?? []).map((p) => rowKey(p.name as string, p.client_name as string)),
     canPay: access.can("payments"),
     today: todayISO(),
@@ -844,7 +861,7 @@ export async function importProjects(rows: ImportRow[]): Promise<{ ok: boolean; 
     name: text(r.name), client: text(r.client), website: text(r.website), onboarded: text(r.onboarded), reporting: text(r.reporting),
     services: list_(r.services).map((x) => x.trim().replace(/\s+/g, " ")).filter(Boolean), managerId: text(r.managerId), managerRaw: text(r.managerRaw),
     teamIds: list_(r.teamIds), teamRaw: list_(r.teamRaw), notes: text(r.notes), payDate: text(r.payDate), amount: text(r.amount), term: text(r.term),
-    method: text(r.method), collectedUpTo: text(r.collectedUpTo),
+    method: text(r.method), collectedUpTo: text(r.collectedUpTo), currency: normalizeCurrency(text(r.currency) || DEFAULT_CURRENCY) || text(r.currency).trim(),
   }));
 
   const ctx = await importContext(access);
@@ -894,14 +911,14 @@ export async function getDeleteSummary(projectId: string): Promise<{ ok: true; n
     const count = async (table: string, col = "project_id") => (await supabaseAdmin.from(table).select("*", { count: "exact", head: true }).eq(col, projectId)).count ?? 0;
     const [{ data: p }, { data: dues }, reports, notes, statusChanges, teamHistory, activity] = await Promise.all([
       supabaseAdmin.from("projects").select("name, client_name").eq("id", projectId).maybeSingle(),
-      supabaseAdmin.from("payment_dues").select("amount_usd, status").eq("project_id", projectId),
+      supabaseAdmin.from("payment_dues").select("amount_usd, currency, status").eq("project_id", projectId),
       count("report_log"), count("project_notes"), count("project_status_log"), count("project_team_history"), count("activity_log"),
     ]);
     if (!p) return { ok: false, error: "Project not found." };
     const paid = (dues ?? []).filter((d) => d.status === "paid");
     return {
       ok: true, name: p.name as string, client: p.client_name as string, payments: (dues ?? []).length, paid: paid.length,
-      paidTotal: formatUSD(paid.reduce((sum, d) => sum + Number(d.amount_usd ?? 0), 0)), reports, notes, statusChanges, teamHistory, activity,
+      paidTotal: formatTotals(paid.reduce<Totals>((t, d) => addTo(t, d.currency as string | null, Number(d.amount_usd ?? 0)), {})), reports, notes, statusChanges, teamHistory, activity,
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Something went wrong." };

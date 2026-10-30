@@ -60,8 +60,8 @@ async function runDigestInner(opts: { force?: boolean }): Promise<DigestRun> {
   const [projectsRes, ledgerRes, sendsRes, employeesRes] = await Promise.all([
     supabaseAdmin
       .from("projects")
-      .select("id, name, client_name, status, reporting_date, created_at, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd, project_assignments(employee_id)"),
-    supabaseAdmin.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at").returns<Due[]>(),
+      .select("id, name, client_name, status, reporting_date, created_at, project_manager_id, payment_date, payment_term, payment_method, payment_amount_usd, currency, project_assignments(employee_id)"),
+    supabaseAdmin.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at").returns<Due[]>(),
     supabaseAdmin.from("report_log").select("project_id, due_date, sent_at").returns<ReportSend[]>(),
     supabaseAdmin.from("employees").select("id, name, email, is_active"),
   ]);

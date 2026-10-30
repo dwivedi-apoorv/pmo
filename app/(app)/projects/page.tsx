@@ -11,7 +11,6 @@ import { todayISO } from "@/lib/reporting";
 import type { TeamPeriod } from "@/lib/history";
 import { nextReportDate } from "@/lib/reporting";
 import {
-  formatUSD,
   methodLabel,
   nextPaymentDate,
   termLabel,
@@ -26,6 +25,7 @@ import { OnboardingNotesButton } from "@/components/onboarding-notes-button";
 import { RiskNote } from "@/components/risk-note";
 import { ProjectStatusMenu } from "@/components/project-status-menu";
 import { PageHeader } from "@/components/page-header";
+import { formatMoney, currencyOrder } from "@/lib/currency";
 import { NewProjectButton } from "@/components/new-project-button";
 import { ImportProjectsDialog } from "@/components/import-projects-dialog";
 import { rowKey } from "@/lib/import-projects";
@@ -82,12 +82,12 @@ export default async function ProjectsPage({
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
 
-  const [projectsRes, peopleRes, ledgerRes, chatsRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
+  const [projectsRes, peopleRes, ledgerRes, currenciesRes, chatsRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
     limitTo(
       supabase
         .from("projects")
         .select(
-          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
+          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, currency, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
         )
         .order("reporting_date", { ascending: true }),
       scope,
@@ -95,8 +95,9 @@ export default async function ProjectsPage({
     ).returns<Project[]>(),
     loadPeople(),
     canPay
-      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, term, method, status, paid_at"), scope).returns<Due[]>()
+      ? limitTo(supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at"), scope).returns<Due[]>()
       : Promise.resolve({ data: [] as Due[], error: null }),
+    supabase.from("currencies").select("code").returns<{ code: string }[]>(),
     limitTo(supabase.from("project_chats").select("project_id, web_url"), scope).returns<{ project_id: string; web_url: string | null }[]>(),
     supabase.from("status_reasons").select("status, name").order("name").returns<{ status: "halted" | "ended" | "completed"; name: string }[]>(),
     limitTo(supabase.from("project_status_log").select("project_id, status, reason, changed_at").order("changed_at", { ascending: false }), scope).returns<StatusLogRow[]>(),
@@ -107,7 +108,7 @@ export default async function ProjectsPage({
     supabase.from("project_note_versions").select(VERSION_COLUMNS).order("saved_at", { ascending: false }).returns<NoteVersion[]>(),
   ]);
 
-  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? reasonsRes.error ?? chatsRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
+  const error = projectsRes.error ?? peopleRes.error ?? ledgerRes.error ?? currenciesRes.error ?? reasonsRes.error ?? chatsRes.error ?? statusRes.error ?? historyRes.error ?? sendsRes.error ?? servicesRes.error ?? notesRes.error ?? versionsRes.error;
   if (error) {
     return (
       <div className="w-full space-y-6 p-4 sm:p-6">
@@ -118,6 +119,7 @@ export default async function ProjectsPage({
   }
 
   const ledger = ledgerRes.data ?? [];
+  const currencyCodes = currencyOrder((currenciesRes.data ?? []).map((c) => c.code));
   const chatByProject = new Map((chatsRes.data ?? []).map((c) => [c.project_id, c.web_url]));
   const reasonLists: Record<"halted" | "ended" | "completed", string[]> = { halted: [], ended: [], completed: [] };
   for (const r of reasonsRes.data ?? []) reasonLists[r.status].push(r.name);
@@ -201,9 +203,10 @@ export default async function ProjectsPage({
                 services={servicesRes.data ?? []}
                 existing={allProjects.map((p) => rowKey(p.name, p.client_name))}
                 canPay={canPay}
+                currencies={currencyCodes}
                 today={todayISO()}
               />
-              <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} />
+              <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} currencies={currencyCodes} />
             </div>
           ) : undefined
         }
@@ -363,7 +366,7 @@ export default async function ProjectsPage({
                             <>
                               {next ?? <span className="text-muted-foreground">—</span>}
                               <div className="max-w-40 text-xs whitespace-normal text-muted-foreground">
-                                {formatUSD(p.payment_amount_usd)} · {termLabel(p.payment_term)} · {methodLabel(p.payment_method)}
+                                {formatMoney(p.payment_amount_usd, p.currency)} · {termLabel(p.payment_term)} · {methodLabel(p.payment_method)}
                               </div>
                               {overdue && (
                                 <div className="text-xs font-medium text-destructive">Overdue since {overdue}</div>
@@ -402,6 +405,7 @@ export default async function ProjectsPage({
                       <div className="flex items-center justify-end gap-1">
                       {canManage && <EditProjectDialog
                         showPayment={canPay}
+                        currencies={currencyCodes}
                         id={p.id}
                         values={{
                           name: p.name,
@@ -413,6 +417,7 @@ export default async function ProjectsPage({
                           payment_term: p.payment_term,
                           payment_method: p.payment_method,
                           payment_amount_usd: p.payment_amount_usd,
+                          currency: p.currency,
                         }}
                         managers={managerOptions}
                         people={peopleOptions}

@@ -1,5 +1,6 @@
 import { dueLabel } from "@/lib/reporting";
-import { formatUSD, methodLabel, termLabel } from "@/lib/payments";
+import { formatMoney } from "@/lib/currency";
+import { methodLabel, termLabel } from "@/lib/payments";
 import type { AttentionRow } from "@/lib/dues";
 import type { ProjectInfo } from "@/lib/payments-data";
 import { STATUS_LABEL } from "@/lib/status";
@@ -35,7 +36,7 @@ export function AttentionList({
             {pi && pi.status !== "active" && <Badge variant="secondary">{STATUS_LABEL[pi.status]}</Badge>}
             {!compact && <span className="text-sm text-muted-foreground">{pi?.client}</span>}
             <span className={overdue ? "text-sm font-medium text-destructive" : "text-sm text-muted-foreground"}>{r.due}</span>
-            <span className="text-sm font-medium">{formatUSD(r.amount)}</span>
+            <span className="text-sm font-medium">{formatMoney(r.amount, r.currency)}</span>
             {!compact && r.term && <Badge variant="secondary">{termLabel(r.term)}</Badge>}
             {!compact && r.method && (
               <Badge variant="outline">{r.method === "subscription" ? "Auto-charge" : methodLabel(r.method)}</Badge>

@@ -14,7 +14,8 @@ import {
 export type Due = {
   project_id: string;
   due_date: string;
-  amount_usd: number;
+  amount_usd: number; // in the row's currency (the column keeps its old name)
+  currency?: string | null;
   term: PaymentTerm | null;
   method: PaymentMethod | null;
   status: "due" | "paid";
@@ -29,6 +30,7 @@ export type AttentionRow = {
   due: string;
   days: number; // negative = overdue
   amount: number;
+  currency: string;
   term: PaymentTerm | null;
   method: PaymentMethod | null;
 };
@@ -50,7 +52,7 @@ export function attentionRows(active: PlanProject[], ledger: Due[], today = toda
     if (d.status !== "due") continue;
     const days = daysUntil(d.due_date, today);
     if (days <= paymentWindowDays(d.method)) {
-      rows.push({ project_id: d.project_id, due: d.due_date, days, amount: d.amount_usd, term: d.term, method: d.method });
+      rows.push({ project_id: d.project_id, due: d.due_date, days, amount: d.amount_usd, currency: d.currency || "USD", term: d.term, method: d.method });
     }
   }
 
@@ -62,6 +64,7 @@ export function attentionRows(active: PlanProject[], ledger: Due[], today = toda
       due,
       days: daysUntil(due, today),
       amount: p.payment_amount_usd ?? 0,
+      currency: p.currency || "USD",
       term: p.payment_term,
       method: p.payment_method,
     });
@@ -89,7 +92,7 @@ export function overdueSince(
   return dates.length ? dates.sort()[0] : null;
 }
 
-export type ProjectionItem = { project_id: string; project: string; date: string; amount: number; paid: boolean };
+export type ProjectionItem = { project_id: string; project: string; date: string; amount: number; currency: string; paid: boolean };
 
 /**
  * Everything that belongs to one month of the revenue view:
@@ -108,12 +111,12 @@ export function monthItems(
   const byKey = index(ledger);
   const fromLedger = ledger
     .filter((d) => d.due_date >= month.start && d.due_date <= month.end)
-    .map((d) => ({ project_id: d.project_id, project: label(d.project_id), date: d.due_date, amount: d.amount_usd, paid: d.status === "paid" }));
+    .map((d) => ({ project_id: d.project_id, project: label(d.project_id), date: d.due_date, amount: d.amount_usd, currency: d.currency || "USD", paid: d.status === "paid" }));
   const forecast = includeUnopened
     ? active.flatMap((p) =>
         paymentDatesBetween(p, month.start, month.end)
           .filter((date) => !byKey.has(paymentKey(p.id, date)))
-          .map((date) => ({ project_id: p.id, project: label(p.id), date, amount: p.payment_amount_usd ?? 0, paid: false }))
+          .map((date) => ({ project_id: p.id, project: label(p.id), date, amount: p.payment_amount_usd ?? 0, currency: p.currency || "USD", paid: false }))
       )
     : [];
   return [...fromLedger, ...forecast].sort((a, b) => a.date.localeCompare(b.date) || a.project.localeCompare(b.project));

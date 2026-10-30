@@ -4,7 +4,8 @@ import { loadPeople } from "@/lib/people";
 import { loadPaymentsData } from "@/lib/payments-data";
 import { requirePagePermission } from "@/lib/access";
 import { attentionRows, monthItems } from "@/lib/dues";
-import { formatUSD, projectionMonths } from "@/lib/payments";
+import { formatMoney, formatTotals, minusTotals, sumByCurrency } from "@/lib/currency";
+import { projectionMonths } from "@/lib/payments";
 import { todayISO } from "@/lib/reporting";
 import { markPaid, undoPaid } from "@/app/actions";
 import { AttentionList } from "@/components/attention-list";
@@ -50,11 +51,11 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
 
   const attention = attentionRows(active, ledger, today);
   const overdueRows = attention.filter((r) => r.days < 0);
-  const overdueTotal = overdueRows.reduce((sum, r) => sum + r.amount, 0);
+  const overdueTotal = sumByCurrency(overdueRows, (r) => r);
 
   const rows = monthItems(month, active, ledger, labelOf, isCurrent);
-  const expected = rows.reduce((sum, it) => sum + it.amount, 0);
-  const received = rows.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
+  const expected = sumByCurrency(rows, (it) => it);
+  const received = sumByCurrency(rows.filter((it) => it.paid), (it) => it);
 
   // Month by month: every month the ledger has rows for (up to now), newest first.
   const monthKeys = [...new Set([currentKey, ...ledger.map((d) => d.due_date.slice(0, 7))])]
@@ -64,9 +65,10 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const history = monthKeys.map((key) => {
     const m = projectionMonths(`${key}-01`, 1)[0];
     const items = monthItems(m, active, ledger, labelOf, key === currentKey);
-    const billed = items.reduce((sum, it) => sum + it.amount, 0);
-    const collected = items.filter((it) => it.paid).reduce((sum, it) => sum + it.amount, 0);
-    return { key, label: m.label, count: items.length, billed, collected, outstanding: billed - collected };
+    const billed = sumByCurrency(items, (it) => it);
+    const collected = sumByCurrency(items.filter((it) => it.paid), (it) => it);
+    const outstanding = minusTotals(billed, collected);
+    return { key, label: m.label, count: items.length, billed, collected, outstanding, owing: Object.values(outstanding).some((v) => v > 0.004) };
   });
 
   const prevKey = shiftMonth(month.key, -1);
@@ -88,7 +90,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
             <span className="ml-2 text-sm font-normal text-muted-foreground">{attention.length}</span>
             {overdueRows.length > 0 && (
               <Badge variant="destructive" className="ml-2 align-middle">
-                {overdueRows.length} overdue · {formatUSD(overdueTotal)}
+                {overdueRows.length} overdue · {formatTotals(overdueTotal)}
               </Badge>
             )}
           </CardTitle>
@@ -154,7 +156,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                   <li key={`${it.project_id}-${it.date}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0">
                     <span className="w-24 shrink-0 text-muted-foreground tabular-nums">{it.date}</span>
                     <span className="min-w-0 flex-1 truncate font-medium">{it.project}</span>
-                    <span className="tabular-nums">{formatUSD(it.amount)}</span>
+                    <span className="tabular-nums">{formatMoney(it.amount, it.currency)}</span>
                     <Badge variant={it.paid ? "secondary" : overdue ? "destructive" : "outline"} className="w-16 justify-center">
                       {it.paid ? "Paid" : overdue ? "Overdue" : "Due"}
                     </Badge>
@@ -199,10 +201,10 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                     {h.key === currentKey && <span className="ml-2 text-xs text-muted-foreground">this month</span>}
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{h.count}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatUSD(h.billed)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatUSD(h.collected)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${h.outstanding > 0 ? "font-medium text-destructive" : ""}`}>
-                    {formatUSD(h.outstanding)}
+                  <TableCell className="text-right tabular-nums">{formatTotals(h.billed)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatTotals(h.collected)}</TableCell>
+                  <TableCell className={`text-right tabular-nums ${h.owing ? "font-medium text-destructive" : ""}`}>
+                    {formatTotals(h.outstanding)}
                   </TableCell>
                 </TableRow>
               ))}

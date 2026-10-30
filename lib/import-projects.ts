@@ -1,3 +1,4 @@
+import { DEFAULT_CURRENCY, isCurrencyCode } from "@/lib/currency";
 import { webLink } from "@/lib/notify/project";
 
 // Bulk import of projects from an Excel sheet. Everything here is plain functions (no database), so the
@@ -14,7 +15,7 @@ export const TEMPLATE_HEADERS = [
   "Team members (emails)",
   "Onboarding notes",
   "First payment date",
-  "Payment amount (USD)",
+  "Payment amount",
   "Payment term",
   "Payment method",
   "Payments collected up to",
@@ -35,6 +36,7 @@ export type ImportRow = {
   notes: string;
   payDate: string;
   amount: string;
+  currency: string; // USD by default; shown in the preview (not a column in the sheet)
   term: string; // one_off | monthly | quarterly | biannual
   method: string; // subscription | stripe_link | bank_wire
   collectedUpTo: string;
@@ -42,13 +44,14 @@ export type ImportRow = {
 
 export const emptyRow = (): ImportRow => ({
   name: "", client: "", website: "", onboarded: "", reporting: "", services: [], managerId: "", managerRaw: "", teamIds: [], teamRaw: [],
-  notes: "", payDate: "", amount: "", term: "", method: "", collectedUpTo: "",
+  notes: "", payDate: "", amount: "", currency: DEFAULT_CURRENCY, term: "", method: "", collectedUpTo: "",
 });
 
 export type ImportContext = {
   employees: { id: string; name: string; email: string | null }[]; // active employees
   services: { id: string; name: string }[];
   existing: string[]; // rowKey of every project already in the app
+  currencies: string[]; // the currencies in the list (USD, CAD, ...)
   canPay: boolean; // may this person set payment plans? if not, payment columns are ignored
   today: string;
 };
@@ -135,6 +138,7 @@ export function rowFromCells(cells: Record<string, unknown>, ctx: Pick<ImportCon
     notes: String(get("Onboarding notes", "Notes") ?? "").trim(),
     payDate: toISODate(get("First payment date", "Payment date")),
     amount: text("Payment amount (USD)", "Payment amount", "Amount").replace(/[$,\s]/g, ""),
+    currency: DEFAULT_CURRENCY,
     term: text("Payment term", "Term") ? normalizeTerm(text("Payment term", "Term")) : "",
     method: text("Payment method", "Method") ? normalizeMethod(text("Payment method", "Method")) : "",
     collectedUpTo: toISODate(get("Payments collected up to", "Collected up to")),
@@ -166,12 +170,14 @@ export function validateRows(rows: ImportRow[], ctx: ImportContext): RowErrors[]
     if (r.teamRaw.length) e.teamIds = `No active employee matches ${r.teamRaw.map((t) => `“${t}”`).join(", ")}. Pick from the list`;
     else if (r.teamIds.some((id) => !active.has(id))) e.teamIds = "Someone on the team isn't active";
 
+    if (ctx.canPay && r.currency !== DEFAULT_CURRENCY && !hasPaymentData(r) && !isCurrencyCode(r.currency)) e.currency = "Choose a currency, or type a 3-letter code like GBP";
     if (ctx.canPay && hasPaymentData(r)) {
       if (!r.payDate) e.payDate = "First payment date is required";
       else if (!isDate(r.payDate)) e.payDate = "Use a date like 2026-10-05";
       const amount = Number(r.amount);
       if (!r.amount) e.amount = "Amount is required";
       else if (!Number.isFinite(amount) || amount < 0) e.amount = "Enter an amount in USD, like 500";
+      if (!isCurrencyCode(r.currency)) e.currency = "Choose a currency, or type a 3-letter code like GBP";
       if (!TERMS.some((t) => t.value === r.term)) e.term = "Choose a term";
       if (!METHODS.some((m) => m.value === r.method)) e.method = "Choose a method";
       if (r.collectedUpTo) {
@@ -203,8 +209,9 @@ export function rowToFields(r: ImportRow, canPay: boolean): { name: string; valu
     { name: "onboarding_notes", value: r.notes },
     ...r.teamIds.map((id) => ({ name: "assignees", value: id })),
   ];
+  if (canPay && !hasPaymentData(r) && r.currency !== DEFAULT_CURRENCY) f.push({ name: "currency", value: r.currency });
   if (canPay && hasPaymentData(r)) {
-    f.push({ name: "payment_date", value: r.payDate }, { name: "payment_amount_usd", value: r.amount }, { name: "payment_term", value: r.term }, { name: "payment_method", value: r.method });
+    f.push({ name: "payment_date", value: r.payDate }, { name: "payment_amount_usd", value: r.amount }, { name: "currency", value: r.currency }, { name: "payment_term", value: r.term }, { name: "payment_method", value: r.method });
     if (r.collectedUpTo) f.push({ name: "backfill", value: "1" }, { name: "backfill_until", value: r.collectedUpTo });
   }
   return f;

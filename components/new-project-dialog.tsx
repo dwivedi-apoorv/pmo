@@ -24,6 +24,7 @@ export function NewProjectDialog({
   managers,
   services,
   showPayment = true,
+  currencies = ["USD", "CAD"],
   open,
   onOpenChange: setOpen,
 }: {
@@ -31,6 +32,7 @@ export function NewProjectDialog({
   managers: EmployeeOption[];
   services: Service[];
   showPayment?: boolean;
+  currencies?: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -60,7 +62,7 @@ export function NewProjectDialog({
         </DialogHeader>
 
         <form action={onSubmit} className="grid gap-4">
-          <ProjectFields showPayment={showPayment} />
+          <ProjectFields showPayment={showPayment} currencies={currencies} />
           <ServicePicker services={services} />
           <ProjectPeopleFields managers={managers} people={employees} />
           <div className="grid gap-1.5">

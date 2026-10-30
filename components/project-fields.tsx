@@ -6,7 +6,9 @@ import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/simple-select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { backfillDates, hasEarlierMonths, lastMonthEnd } from "@/lib/backfill";
-import { PAYMENT_METHODS, PAYMENT_TERMS, formatUSD, type PaymentPlan, type PaymentTerm } from "@/lib/payments";
+import { PAYMENT_METHODS, PAYMENT_TERMS, type PaymentPlan, type PaymentTerm } from "@/lib/payments";
+import { CurrencyPicker } from "@/components/currency-picker";
+import { formatMoney } from "@/lib/currency";
 import { todayISO } from "@/lib/reporting";
 
 export type ProjectValues = {
@@ -20,7 +22,7 @@ export type ProjectValues = {
 // Shared by the create and edit dialogs so the two never drift apart.
 // Creating (no `values`): dates are pre-filled. Onboarding and reporting start as today, and the
 // first payment date follows the onboarding date until you pick a payment date yourself.
-export function ProjectFields({ values, showPayment = true }: { values?: ProjectValues; showPayment?: boolean }) {
+export function ProjectFields({ values, showPayment = true, currencies = ["USD", "CAD"] }: { values?: ProjectValues; showPayment?: boolean; currencies?: string[] }) {
   const isNew = !values;
   const today = todayISO();
 
@@ -29,6 +31,7 @@ export function ProjectFields({ values, showPayment = true }: { values?: Project
   const [paymentEdited, setPaymentEdited] = useState(false);
   const [term, setTerm] = useState<PaymentTerm | null>(values?.payment_term ?? null);
   const [amount, setAmount] = useState(values?.payment_amount_usd?.toString() ?? "");
+  const [currency, setCurrency] = useState(values?.currency || "USD");
   const [backfill, setBackfill] = useState(false);
   const [until, setUntil] = useState(lastMonthEnd(today));
 
@@ -92,7 +95,7 @@ export function ProjectFields({ values, showPayment = true }: { values?: Project
       {showPayment && (
       <div className="grid gap-3 border-t pt-4">
         <p className="text-sm font-medium">Payment</p>
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-5">
           <div className="grid gap-1.5">
             <Label htmlFor="payment_date">First payment date</Label>
             <Input
@@ -108,24 +111,22 @@ export function ProjectFields({ values, showPayment = true }: { values?: Project
             />
           </div>
           <div className="grid gap-1.5">
-            <Label htmlFor="payment_amount_usd">Amount (USD)</Label>
-            <div className="relative">
-              <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm text-muted-foreground">
-                $
-              </span>
-              <Input
-                id="payment_amount_usd"
-                name="payment_amount_usd"
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                className="pl-6"
-                defaultValue={values?.payment_amount_usd ?? ""}
-                onChange={(e) => setAmount(e.target.value)}
-                required
-              />
-            </div>
+            <Label htmlFor="payment_amount_usd">Amount ({currency})</Label>
+            <Input
+              id="payment_amount_usd"
+              name="payment_amount_usd"
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              defaultValue={values?.payment_amount_usd ?? ""}
+              onChange={(e) => setAmount(e.target.value)}
+              required
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <CurrencyPicker options={currencies} defaultValue={values?.currency || "USD"} onChange={setCurrency} />
+            {values && <p className="text-xs text-muted-foreground">Payments already in the ledger keep their currency.</p>}
           </div>
           <div className="grid gap-1.5">
             <Label>Term</Label>
@@ -188,7 +189,7 @@ export function ProjectFields({ values, showPayment = true }: { values?: Project
                       ? "No payments fall in that range."
                       : `Will record ${dates.length} ${dates.length === 1 ? "payment" : "payments"} as paid (${dates[0]}${
                           dates.length > 1 ? ` to ${dates[dates.length - 1]}` : ""
-                        }), ${formatUSD(total)} in total.`}
+                        }), ${formatMoney(total, currency)} in total.`}
                 </p>
               </>
             )}
