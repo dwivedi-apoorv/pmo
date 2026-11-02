@@ -135,8 +135,8 @@ export default async function Home() {
 
   // How active projects are paid: by method, and the one-off payments (this month and overall).
   const methodRows = [
-    ...PAYMENT_METHODS.map((m) => ({ label: methodLabel(m.value), count: projects.filter((p) => p.payment_method === m.value).length })),
-    { label: "Not set", count: projects.filter((p) => !p.payment_method).length },
+    ...PAYMENT_METHODS.map((m) => ({ value: m.value, label: m.value === "bank_wire" ? "Manual" : methodLabel(m.value), count: projects.filter((p) => p.payment_method === m.value).length })),
+    { value: "", label: "Not set", count: projects.filter((p) => !p.payment_method).length },
   ].filter((r) => r.count > 0 || r.label !== "Not set");
   const oneOffs = projects.filter((p) => p.payment_term === "one_off");
   const oneOffsThisMonth = oneOffs.filter((p) => p.payment_date && p.payment_date >= month.start && p.payment_date <= month.end);
@@ -411,14 +411,20 @@ export default async function Home() {
           <Card>
             <CardHeader>
               <CardTitle>Payment methods</CardTitle>
-              <CardDescription>How the {projects.length} active {projects.length === 1 ? "project pays" : "projects pay"}. Bank wire is the manual method.</CardDescription>
+              <CardDescription>How the {projects.length} active {projects.length === 1 ? "project pays" : "projects pay"}. Manual means bank wire.</CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 {methodRows.map((r) => (
                   <div key={r.label}>
-                    <dt className="text-sm text-muted-foreground">{r.label === "Bank wire" ? "Manual (bank wire)" : r.label}</dt>
-                    <dd className="text-2xl font-semibold tabular-nums">{r.count}</dd>
+                    <dt className="text-sm text-muted-foreground">{r.label}</dt>
+                    <dd className="text-2xl font-semibold tabular-nums">
+                      {r.value && r.count > 0 ? (
+                        <Link href={`/projects?method=${r.value}`} className="underline-offset-4 hover:underline" title={`Show the ${r.label.toLowerCase()} projects`}>{r.count}</Link>
+                      ) : (
+                        r.count
+                      )}
+                    </dd>
                   </div>
                 ))}
               </dl>
@@ -438,7 +444,9 @@ export default async function Home() {
                 </div>
                 <div>
                   <dt className="text-sm text-muted-foreground">All active projects</dt>
-                  <dd className="text-2xl font-semibold tabular-nums">{oneOffs.length}</dd>
+                  <dd className="text-2xl font-semibold tabular-nums">
+                    {oneOffs.length > 0 ? <Link href="/projects?term=one_off" className="underline-offset-4 hover:underline" title="Show the one-off projects">{oneOffs.length}</Link> : 0}
+                  </dd>
                 </div>
               </dl>
             </CardContent>

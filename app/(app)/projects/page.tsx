@@ -11,9 +11,11 @@ import { todayISO } from "@/lib/reporting";
 import type { TeamPeriod } from "@/lib/history";
 import { nextReportDate } from "@/lib/reporting";
 import {
+  isPaymentMethod,
   methodLabel,
   nextPaymentDate,
   termLabel,
+  type PaymentMethod,
   type PaymentPlan,
 } from "@/lib/payments";
 import { PROJECT_STATUSES, STATUS_LABEL, isProjectStatus, type ProjectStatus } from "@/lib/status";
@@ -66,7 +68,7 @@ const SORT_KEYS: SortKey[] = ["name", "client", "website", "onboarded", "reporti
 export default async function ProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string; dir?: string; q?: string; status?: string; risk?: string; service?: string }>;
+  searchParams: Promise<{ sort?: string; dir?: string; q?: string; status?: string; risk?: string; service?: string; method?: string; term?: string }>;
 }) {
   const access = await requirePageAccess();
   const { scope } = access;
@@ -78,6 +80,8 @@ export default async function ProjectsPage({
   const q = (sp.q ?? "").trim();
   const tab: Tab = sp.status === "all" ? "all" : sp.status && isProjectStatus(sp.status) ? sp.status : "active";
   const serviceFilter = (sp.service ?? "").trim(); // quick filter: only projects with this service
+  const methodFilter = canPay && isPaymentMethod(sp.method ?? "") ? (sp.method as string) : ""; // quick filter: only projects paid this way
+  const oneOffOnly = canPay && sp.term === "one_off"; // quick filter: only one-off projects
   const riskOnly = sp.risk === "1"; // quick filter: only active projects that are at risk
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
@@ -148,7 +152,7 @@ export default async function ProjectsPage({
   const lastChange = new Map<string, StatusLogRow>();
   for (const r of statusRes.data ?? []) if (!lastChange.has(r.project_id)) lastChange.set(r.project_id, r);
 
-  const projects = allProjects.filter((p) => (tab === "all" || p.status === tab) && (!riskOnly || risk.has(p.id)) && (!serviceFilter || servicesOf(p).some((x) => x.name.toLowerCase() === serviceFilter.toLowerCase()))).sort((a, b) => {
+  const projects = allProjects.filter((p) => (tab === "all" || p.status === tab) && (!riskOnly || risk.has(p.id)) && (!methodFilter || p.payment_method === methodFilter) && (!oneOffOnly || p.payment_term === "one_off") && (!serviceFilter || servicesOf(p).some((x) => x.name.toLowerCase() === serviceFilter.toLowerCase()))).sort((a, b) => {
     const ka = keyOf(a);
     const kb = keyOf(b);
     const cmp = typeof ka === "number" && typeof kb === "number" ? ka - kb : String(ka).localeCompare(String(kb));
@@ -158,6 +162,8 @@ export default async function ProjectsPage({
     ...(tab === "active" ? {} : { status: tab }),
     ...(riskOnly ? { risk: "1" } : {}),
     ...(serviceFilter ? { service: serviceFilter } : {}),
+    ...(methodFilter ? { method: methodFilter } : {}),
+    ...(oneOffOnly ? { term: "one_off" } : {}),
   };
   const showStatus = tab !== "active";
   const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -217,7 +223,7 @@ export default async function ProjectsPage({
         {(["active", "halted", "completed", "ended", "all"] as const).map((t) => (
           <Link
             key={t}
-            href={`/projects?${new URLSearchParams({ ...(t === "active" ? {} : { status: t }), ...(serviceFilter ? { service: serviceFilter } : {}), ...(q ? { q } : {}) })}`}
+            href={`/projects?${new URLSearchParams({ ...(t === "active" ? {} : { status: t }), ...(serviceFilter ? { service: serviceFilter } : {}), ...(methodFilter ? { method: methodFilter } : {}), ...(oneOffOnly ? { term: "one_off" } : {}), ...(q ? { q } : {}) })}`}
             role="tab"
             aria-selected={tab === t && !riskOnly}
             className={`rounded-md px-3 py-1 transition-colors ${
@@ -229,7 +235,7 @@ export default async function ProjectsPage({
         ))}
       </div>
       <Link
-        href={riskOnly ? "/projects" : `/projects?${new URLSearchParams({ risk: "1", ...(serviceFilter ? { service: serviceFilter } : {}), ...(q ? { q } : {}) })}`}
+        href={riskOnly ? "/projects" : `/projects?${new URLSearchParams({ risk: "1", ...(serviceFilter ? { service: serviceFilter } : {}), ...(methodFilter ? { method: methodFilter } : {}), ...(oneOffOnly ? { term: "one_off" } : {}), ...(q ? { q } : {}) })}`}
         aria-pressed={riskOnly}
         className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
           riskOnly
@@ -241,6 +247,16 @@ export default async function ProjectsPage({
       >
         At risk <span className="tabular-nums">{risk.size}</span>
       </Link>
+      {(methodFilter || oneOffOnly) && (
+        <Link
+          href={`/projects?${new URLSearchParams({ ...(tab === "active" ? {} : { status: tab }), ...(riskOnly ? { risk: "1" } : {}), ...(serviceFilter ? { service: serviceFilter } : {}), ...(q ? { q } : {}) })}`}
+          className="inline-flex items-center gap-1.5 rounded-lg border bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/70"
+          title="Clear the payment filter"
+        >
+          Payment: <span className="font-medium">{methodFilter ? methodLabel(methodFilter as PaymentMethod) : "One-off"}</span> <span aria-hidden>×</span>
+          <span className="sr-only">Clear the payment filter</span>
+        </Link>
+      )}
       {serviceFilter && (
         <Link
           href={`/projects?${new URLSearchParams({ ...(tab === "active" ? {} : { status: tab }), ...(riskOnly ? { risk: "1" } : {}), ...(q ? { q } : {}) })}`}
