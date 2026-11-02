@@ -4,7 +4,7 @@ import { limitTo, requirePageAccess } from "@/lib/access";
 import { loadPeople } from "@/lib/people";
 import { addDays, todayISO } from "@/lib/reporting";
 import { formatTotals, sumByCurrency } from "@/lib/currency";
-import { projectionMonths, type PaymentPlan } from "@/lib/payments";
+import { methodLabel, projectionMonths, PAYMENT_METHODS, type PaymentPlan } from "@/lib/payments";
 import { attentionRows, monthItems } from "@/lib/dues";
 import { loadPaymentsData } from "@/lib/payments-data";
 import { reportAttention, type ReportSend } from "@/lib/reports";
@@ -132,6 +132,15 @@ export default async function Home() {
   const monthRows = monthItems(month, active, ledger, labelOf);
   const monthExpected = sumByCurrency(monthRows, (it) => it);
   const monthReceived = sumByCurrency(monthRows.filter((it) => it.paid), (it) => it);
+
+  // How active projects are paid: by method, and the one-off payments (this month and overall).
+  const methodRows = [
+    ...PAYMENT_METHODS.map((m) => ({ label: methodLabel(m.value), count: projects.filter((p) => p.payment_method === m.value).length })),
+    { label: "Not set", count: projects.filter((p) => !p.payment_method).length },
+  ].filter((r) => r.count > 0 || r.label !== "Not set");
+  const oneOffs = projects.filter((p) => p.payment_term === "one_off");
+  const oneOffsThisMonth = oneOffs.filter((p) => p.payment_date && p.payment_date >= month.start && p.payment_date <= month.end);
+  const oneOffMonthTotal = sumByCurrency(oneOffsThisMonth, (p) => ({ amount: p.payment_amount_usd ?? 0, currency: p.currency || "USD" }));
 
   // Services: how many active projects (and clients) each service is on.
   const servicesByProject = new Map<string, Service[]>();
@@ -396,6 +405,46 @@ export default async function Home() {
           </CardContent>
         </Card>}
       </div>
+
+      {canPay && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Payment methods</CardTitle>
+              <CardDescription>How the {projects.length} active {projects.length === 1 ? "project pays" : "projects pay"}. Bank wire is the manual method.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {methodRows.map((r) => (
+                  <div key={r.label}>
+                    <dt className="text-sm text-muted-foreground">{r.label === "Bank wire" ? "Manual (bank wire)" : r.label}</dt>
+                    <dd className="text-2xl font-semibold tabular-nums">{r.count}</dd>
+                  </div>
+                ))}
+              </dl>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>One-off payments</CardTitle>
+              <CardDescription>Active projects billed once instead of on a schedule.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <dl className="grid grid-cols-2 gap-4">
+                <div>
+                  <dt className="text-sm text-muted-foreground">This month ({month.label})</dt>
+                  <dd className="text-2xl font-semibold tabular-nums">{oneOffsThisMonth.length}</dd>
+                  {oneOffsThisMonth.length > 0 && <p className="text-xs text-muted-foreground">{formatTotals(oneOffMonthTotal)}</p>}
+                </div>
+                <div>
+                  <dt className="text-sm text-muted-foreground">All active projects</dt>
+                  <dd className="text-2xl font-semibold tabular-nums">{oneOffs.length}</dd>
+                </div>
+              </dl>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         {managerWorkload.length > 0 && (
