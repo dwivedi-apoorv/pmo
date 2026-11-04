@@ -340,7 +340,14 @@ export default async function ProjectsPage({
                       </TableCell>
                     )}
                     {show("client") && (
-                      <TableCell>{p.client_name}</TableCell>
+                      <TableCell>
+                        {p.client_name}
+                        {canPay && (
+                          <Link href={`/payments/${p.id}`} className="block text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                            Payment history
+                          </Link>
+                        )}
+                      </TableCell>
                     )}
                     {show("services") && (
                       <TableCell>
