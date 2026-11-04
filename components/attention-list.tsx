@@ -40,7 +40,7 @@ export function AttentionList({
             {!compact && r.method && (
               <Badge variant="outline">{r.method === "subscription" ? "Auto-charge" : methodLabel(r.method)}</Badge>
             )}
-            {!compact && (
+            {!compact && r.days <= 0 && (
               <div className="ml-auto"><MarkPaidForm projectId={r.project_id} dueDate={r.due} /></div>
             )}
             {!compact && (

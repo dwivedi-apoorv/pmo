@@ -167,6 +167,8 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                         <input type="hidden" name="due_date" value={it.date} />
                         <Button type="submit" size="sm" variant="ghost">Undo</Button>
                       </form>
+                    ) : it.date > today ? (
+                      <span className="w-28" />
                     ) : (
                       <div className="text-right"><MarkPaidForm projectId={it.project_id} dueDate={it.date} /></div>
                     )}

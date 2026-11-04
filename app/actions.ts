@@ -487,6 +487,7 @@ export async function markPaid(formData: FormData) {
   requireProject(access, project_id);
   const due_date = str(formData.get("due_date"));
   if (!project_id || !DATE_RE.test(due_date)) throw new Error("Missing project or due date.");
+  if (due_date > todayISO()) throw new Error("This payment isn't due yet. You can mark it as paid from its due date.");
 
   const { data: existing, error: eErr } = await supabaseAdmin
     .from("payment_dues")

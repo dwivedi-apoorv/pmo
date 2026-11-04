@@ -148,6 +148,8 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                               <Button type="submit" size="sm" variant="ghost">Undo</Button>
                             </form>
                           </div>
+                        ) : d.due_date > today ? (
+                          <span className="text-xs text-muted-foreground">Not due yet</span>
                         ) : (
                           <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
                         )}
