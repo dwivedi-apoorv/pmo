@@ -4,9 +4,8 @@ import { methodLabel, termLabel } from "@/lib/payments";
 import type { AttentionRow } from "@/lib/dues";
 import type { ProjectInfo } from "@/lib/payments-data";
 import { STATUS_LABEL } from "@/lib/status";
-import { markPaid } from "@/app/actions";
+import { MarkPaidForm } from "@/components/mark-paid-form";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 // Payments that need action: overdue first, then coming up. `compact` is the short dashboard version
 // (no term/method and no buttons); the full version on the Payments page has "Mark as paid".
@@ -42,11 +41,7 @@ export function AttentionList({
               <Badge variant="outline">{r.method === "subscription" ? "Auto-charge" : methodLabel(r.method)}</Badge>
             )}
             {!compact && (
-              <form action={markPaid} className="ml-auto">
-                <input type="hidden" name="project_id" value={r.project_id} />
-                <input type="hidden" name="due_date" value={r.due} />
-                <Button type="submit" size="sm" variant="outline">Mark as paid</Button>
-              </form>
+              <div className="ml-auto"><MarkPaidForm projectId={r.project_id} dueDate={r.due} /></div>
             )}
             {!compact && (
               <span className="basis-full text-sm text-muted-foreground">{mgr ? `PM: ${mgr}` : "No project manager"}</span>

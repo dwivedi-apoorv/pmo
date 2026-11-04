@@ -496,7 +496,10 @@ export async function markPaid(formData: FormData) {
     .maybeSingle();
   if (eErr) throw new Error(eErr.message);
 
-  const paid_at = new Date().toISOString();
+  // The day the money actually arrived (defaults to now). Stored at midday India time, like back-filled payments.
+  const paid_on = str(formData.get("paid_on"));
+  if (paid_on && (!DATE_RE.test(paid_on) || paid_on > todayISO())) throw new Error("The paid-on date can't be in the future.");
+  const paid_at = paid_on ? `${paid_on}T12:00:00+05:30` : new Date().toISOString();
   const paidInfo = async () => {
     const [name, { data: row }] = await Promise.all([
       projectLabel(project_id),
@@ -542,6 +545,42 @@ export async function markPaid(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath("/projects");
+}
+
+/** Corrects the date a paid payment was received. Admins and managers (anyone with payments access). */
+export async function updatePaidDate(formData: FormData) {
+  const access = await requirePermission("payments");
+  const me = access.user;
+  const project_id = str(formData.get("project_id"));
+  requireProject(access, project_id);
+  const due_date = str(formData.get("due_date"));
+  const paid_on = str(formData.get("paid_on"));
+  if (!project_id || !DATE_RE.test(due_date) || !DATE_RE.test(paid_on)) throw new Error("Choose a valid date.");
+  if (paid_on > todayISO()) throw new Error("The paid-on date can't be in the future.");
+
+  const { data: row, error: rErr } = await supabaseAdmin
+    .from("payment_dues")
+    .select("status, paid_at, amount_usd, currency")
+    .eq("project_id", project_id)
+    .eq("due_date", due_date)
+    .maybeSingle();
+  if (rErr) throw new Error(rErr.message);
+  if (!row || row.status !== "paid") throw new Error("That payment isn't marked as paid.");
+
+  const before = row.paid_at ? new Date(row.paid_at as string).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : "no date";
+  if (before === paid_on) return;
+  const { error } = await supabaseAdmin
+    .from("payment_dues")
+    .update({ paid_at: `${paid_on}T12:00:00+05:30` })
+    .eq("project_id", project_id)
+    .eq("due_date", due_date);
+  if (error) throw new Error(error.message);
+
+  const name = await projectLabel(project_id);
+  await logActivity({ actor: me, group: "payment", action: "payment_date_changed", projectId: project_id, projectName: name, summary: `${firstName(me.name)} changed the paid date of the ${money(row.amount_usd as number | null, row.currency as string | null)} payment for ${name} (due ${due_date}) from ${before} to ${paid_on}` });
+
+  revalidatePath("/");
+  revalidatePath("/payments");
 }
 
 /** Puts a paid payment back to unpaid. The row stays; nothing is deleted. */

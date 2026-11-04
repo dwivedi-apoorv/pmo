@@ -7,7 +7,8 @@ import { attentionRows, monthItems } from "@/lib/dues";
 import { formatMoney, formatTotals, minusTotals, sumByCurrency } from "@/lib/currency";
 import { projectionMonths } from "@/lib/payments";
 import { todayISO } from "@/lib/reporting";
-import { markPaid, undoPaid } from "@/app/actions";
+import { undoPaid } from "@/app/actions";
+import { MarkPaidForm } from "@/components/mark-paid-form";
 import { AttentionList } from "@/components/attention-list";
 import { OpenDuesButton } from "@/components/open-dues-button";
 import { PageHeader } from "@/components/page-header";
@@ -160,13 +161,15 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                     <Badge variant={it.paid ? "secondary" : overdue ? "destructive" : "outline"} className="w-16 justify-center">
                       {it.paid ? "Paid" : overdue ? "Overdue" : "Due"}
                     </Badge>
-                    <form action={it.paid ? undoPaid : markPaid} className="w-28 text-right">
-                      <input type="hidden" name="project_id" value={it.project_id} />
-                      <input type="hidden" name="due_date" value={it.date} />
-                      <Button type="submit" size="sm" variant={it.paid ? "ghost" : "outline"}>
-                        {it.paid ? "Undo" : "Mark as paid"}
-                      </Button>
-                    </form>
+                    {it.paid ? (
+                      <form action={undoPaid} className="w-28 text-right">
+                        <input type="hidden" name="project_id" value={it.project_id} />
+                        <input type="hidden" name="due_date" value={it.date} />
+                        <Button type="submit" size="sm" variant="ghost">Undo</Button>
+                      </form>
+                    ) : (
+                      <div className="text-right"><MarkPaidForm projectId={it.project_id} dueDate={it.date} /></div>
+                    )}
                   </li>
                 );
               })}

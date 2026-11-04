@@ -6,9 +6,10 @@ import { limitTo, requirePagePermission } from "@/lib/access";
 import type { Due } from "@/lib/dues";
 import { formatMoney, formatTotals, minusTotals, sumByCurrency } from "@/lib/currency";
 import { methodLabel, nextPaymentDate, termLabel, type PaymentPlan } from "@/lib/payments";
-import { todayISO } from "@/lib/reporting";
+import { daysUntil, todayISO } from "@/lib/reporting";
 import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
-import { markPaid, undoPaid } from "@/app/actions";
+import { undoPaid } from "@/app/actions";
+import { EditPaidDate, MarkPaidForm } from "@/components/mark-paid-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -124,15 +125,32 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                           {d.status === "paid" ? "Paid" : overdue ? "Overdue" : "Due"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="tabular-nums">{d.status === "paid" ? paidDate(d.paid_at) : "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {d.status === "paid" ? (
+                          <>
+                            {paidDate(d.paid_at)}
+                            {(() => {
+                              const late = -daysUntil(d.due_date, paidDate(d.paid_at));
+                              return late > 0 ? <span className="ml-2 text-xs text-destructive">{late} {late === 1 ? "day" : "days"} late</span> : null;
+                            })()}
+                          </>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">
-                        <form action={d.status === "paid" ? undoPaid : markPaid}>
-                          <input type="hidden" name="project_id" value={p.id} />
-                          <input type="hidden" name="due_date" value={d.due_date} />
-                          <Button type="submit" size="sm" variant={d.status === "paid" ? "ghost" : "outline"}>
-                            {d.status === "paid" ? "Undo" : "Mark as paid"}
-                          </Button>
-                        </form>
+                        {d.status === "paid" ? (
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            <EditPaidDate projectId={p.id} dueDate={d.due_date} current={paidDate(d.paid_at)} />
+                            <form action={undoPaid}>
+                              <input type="hidden" name="project_id" value={p.id} />
+                              <input type="hidden" name="due_date" value={d.due_date} />
+                              <Button type="submit" size="sm" variant="ghost">Undo</Button>
+                            </form>
+                          </div>
+                        ) : (
+                          <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
+                        )}
                       </TableCell>
                     </TableRow>
                   );

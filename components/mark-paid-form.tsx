@@ -1,0 +1,54 @@
+"use client";
+
+import { useState } from "react";
+import { markPaid, updatePaidDate } from "@/app/actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+const todayIST = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+
+// "Mark as paid" that asks which day the money actually arrived (today by default), so a payment
+// received on 7 April and recorded on the 10th still gets 7 April.
+export function MarkPaidForm({ projectId, dueDate, size = "sm" }: { projectId: string; dueDate: string; size?: "sm" | "default" }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <Button type="button" size={size} variant="outline" onClick={() => setOpen(true)}>
+        Mark as paid
+      </Button>
+    );
+  }
+  return (
+    <form action={markPaid} className="flex flex-wrap items-center justify-end gap-2" onSubmit={() => setOpen(false)}>
+      <input type="hidden" name="project_id" value={projectId} />
+      <input type="hidden" name="due_date" value={dueDate} />
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        Paid on
+        <Input type="date" name="paid_on" defaultValue={todayIST()} max={todayIST()} required className="h-8 w-36" />
+      </label>
+      <Button type="submit" size={size}>Confirm</Button>
+      <Button type="button" size={size} variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
+// Corrects the paid date of a payment that is already marked paid.
+export function EditPaidDate({ projectId, dueDate, current }: { projectId: string; dueDate: string; current: string }) {
+  const [open, setOpen] = useState(false);
+  if (!open) {
+    return (
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(true)}>
+        Edit date
+      </Button>
+    );
+  }
+  return (
+    <form action={updatePaidDate} className="flex flex-wrap items-center justify-end gap-2" onSubmit={() => setOpen(false)}>
+      <input type="hidden" name="project_id" value={projectId} />
+      <input type="hidden" name="due_date" value={dueDate} />
+      <Input type="date" name="paid_on" defaultValue={current} max={todayIST()} required className="h-8 w-36" aria-label="Paid on" />
+      <Button type="submit" size="sm">Save</Button>
+      <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
