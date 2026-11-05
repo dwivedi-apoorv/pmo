@@ -5,7 +5,7 @@ export type Cell = string | number | Date | null;
 const COLUMN_WIDTH: Record<string, number> = {
   Project: 30, Client: 26, Website: 30, Status: 12, "Status since": 14, "Status reason": 34, Services: 30,
   Onboarded: 14, "Report day": 16, "Next report": 14, "Project manager": 22, Team: 34, "Onboarding notes": 60,
-  "Payment amount": 16, Currency: 10, "Payment term": 14, "Payment method": 16, "First payment": 14, "Next payment": 14, "Overdue since": 14,
+  "Payment amount": 16, Currency: 10, "Payment term": 14, "Payment method": 16, "Invoice date": 14, "Next payment": 14, "Overdue since": 14,
 };
 
 /** Turns "2026-10-05" into a real date (so Excel can sort and filter it); anything else stays as text. */

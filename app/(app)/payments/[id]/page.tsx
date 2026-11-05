@@ -71,7 +71,7 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
           {
             label: "Payment plan",
             value: p.payment_term ? `${formatMoney(p.payment_amount_usd ?? 0, p.currency)} · ${termLabel(p.payment_term)}` : "Not set",
-            sub: [methodLabel(p.payment_method), p.payment_date ? `first payment ${p.payment_date}` : ""].filter(Boolean).join(" · "),
+            sub: [methodLabel(p.payment_method), p.payment_date ? `first invoice ${p.payment_date}` : ""].filter(Boolean).join(" · "),
           },
         ].map((c) => (
           <Card size="sm" key={c.label}>
@@ -131,7 +131,7 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                             {paidDate(d.paid_at)}
                             {(() => {
                               const late = -daysUntil(d.due_date, paidDate(d.paid_at));
-                              return late > 0 ? <span className="ml-2 text-xs text-destructive">{late} {late === 1 ? "day" : "days"} late</span> : null;
+                              return late > 0 ? <span className="ml-2 text-xs text-destructive">paid {late} {late === 1 ? "day" : "days"} after invoice</span> : null;
                             })()}
                           </>
                         ) : (

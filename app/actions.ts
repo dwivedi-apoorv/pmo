@@ -36,7 +36,7 @@ function parseBackfill(formData: FormData, firstPaymentDate: string) {
   const until = str(formData.get("backfill_until"));
   if (!/^\d{4}-\d{2}-\d{2}$/.test(until)) throw new Error("Choose the date payments were collected up to.");
   if (until > todayISO()) throw new Error("The collected-up-to date can't be in the future.");
-  if (until < firstPaymentDate) throw new Error("The collected-up-to date is before the first payment date.");
+  if (until < firstPaymentDate) throw new Error("The collected-up-to date is before the first invoice date.");
   return until;
 }
 
@@ -59,7 +59,7 @@ function parsePayment(formData: FormData) {
   const amount = Number(amountRaw);
 
   if (!payment_date || !isPaymentTerm(payment_term) || !isPaymentMethod(payment_method)) {
-    throw new Error("Payment date, term and method are required.");
+    throw new Error("Invoice date, term and method are required.");
   }
   if (!amountRaw || !Number.isFinite(amount) || amount < 0) {
     throw new Error("Enter a valid payment amount in USD.");
@@ -343,7 +343,7 @@ export async function updateProject(formData: FormData) {
     if ((old.currency ?? "USD") !== payment.currency) pc.push(`currency ${old.currency ?? "USD"} → ${payment.currency}`);
     if (old.payment_term !== payment.payment_term) pc.push(`term ${termLabel(old.payment_term) || "none"} → ${termLabel(payment.payment_term)}`);
     if (old.payment_method !== payment.payment_method) pc.push(`method ${methodLabel(old.payment_method) || "none"} → ${methodLabel(payment.payment_method)}`);
-    if (old.payment_date !== payment.payment_date) pc.push(`first payment ${shown(old.payment_date)} → ${payment.payment_date}`);
+    if (old.payment_date !== payment.payment_date) pc.push(`invoice date ${shown(old.payment_date)} → ${payment.payment_date}`);
     if (pc.length) await log("payment", "payment_plan_changed", `${who} changed the payment plan of ${name}: ${pc.join("; ")}`);
   }
   revalidatePath("/payments");

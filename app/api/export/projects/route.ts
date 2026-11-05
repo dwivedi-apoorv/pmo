@@ -92,7 +92,7 @@ export async function GET(request: Request) {
   });
 
   const headers = ["Project", "Client", "Website", "Status", "Status since", "Status reason", "Services", "Onboarded", "Report day", "Next report", "Project manager", "Team", "Onboarding notes",
-    ...(canPay ? ["Payment amount", "Currency", "Payment term", "Payment method", "First payment", "Next payment", "Overdue since"] : [])];
+    ...(canPay ? ["Payment amount", "Currency", "Payment term", "Payment method", "Invoice date", "Next payment", "Overdue since"] : [])];
   const rows: Cell[][] = picked.map((p) => {
     const change = lastChange.get(p.id);
     const isActive = p.status === "active";

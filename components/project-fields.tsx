@@ -21,7 +21,7 @@ export type ProjectValues = {
 
 // Shared by the create and edit dialogs so the two never drift apart.
 // Creating (no `values`): dates are pre-filled. Onboarding and reporting start as today, and the
-// first payment date follows the onboarding date until you pick a payment date yourself.
+// invoice date follows the onboarding date until you pick a payment date yourself.
 export function ProjectFields({ values, showPayment = true, currencies = ["USD", "CAD"] }: { values?: ProjectValues; showPayment?: boolean; currencies?: string[] }) {
   const isNew = !values;
   const today = todayISO();
@@ -35,7 +35,7 @@ export function ProjectFields({ values, showPayment = true, currencies = ["USD",
   const [backfill, setBackfill] = useState(false);
   const [until, setUntil] = useState(lastMonthEnd(today));
 
-  // "Earlier payments were already collected" only makes sense when the first payment is before this month.
+  // "Earlier payments were already collected" only makes sense when the first invoice is before this month.
   const earlier = hasEarlierMonths(payment, today);
   const dates = backfill && earlier ? backfillDates({ payment_date: payment, payment_term: term }, until, today) : [];
   const total = dates.length * (Number(amount) || 0);
@@ -97,7 +97,7 @@ export function ProjectFields({ values, showPayment = true, currencies = ["USD",
         <p className="text-sm font-medium">Payment</p>
         <div className="grid gap-3 sm:grid-cols-5">
           <div className="grid gap-1.5">
-            <Label htmlFor="payment_date">First payment date</Label>
+            <Label htmlFor="payment_date">Invoice date</Label>
             <Input
               id="payment_date"
               name="payment_date"
@@ -151,7 +151,7 @@ export function ProjectFields({ values, showPayment = true, currencies = ["USD",
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          Monthly, quarterly and biannual payments repeat on the same day as the first payment date. One-off is
+          Monthly, quarterly and biannual payments repeat on the same day as the invoice date. One-off is
           paid once on that date.
         </p>
 

@@ -14,7 +14,7 @@ export const TEMPLATE_HEADERS = [
   "Project manager (email)",
   "Team members (emails)",
   "Onboarding notes",
-  "First payment date",
+  "Invoice date",
   "Payment amount",
   "Payment term",
   "Payment method",
@@ -136,7 +136,7 @@ export function rowFromCells(cells: Record<string, unknown>, ctx: Pick<ImportCon
     teamIds: [...new Set(teamHits.flatMap((h) => (h.e ? [h.e.id] : [])))],
     teamRaw: teamHits.filter((h) => !h.e).map((h) => h.t),
     notes: String(get("Onboarding notes", "Notes") ?? "").trim(),
-    payDate: toISODate(get("First payment date", "Payment date")),
+    payDate: toISODate(get("Invoice date", "First payment date", "Payment date")),
     amount: text("Payment amount (USD)", "Payment amount", "Amount").replace(/[$,\s]/g, ""),
     currency: DEFAULT_CURRENCY,
     term: text("Payment term", "Term") ? normalizeTerm(text("Payment term", "Term")) : "",
@@ -172,7 +172,7 @@ export function validateRows(rows: ImportRow[], ctx: ImportContext): RowErrors[]
 
     if (ctx.canPay && r.currency !== DEFAULT_CURRENCY && !hasPaymentData(r) && !isCurrencyCode(r.currency)) e.currency = "Choose a currency, or type a 3-letter code like GBP";
     if (ctx.canPay && hasPaymentData(r)) {
-      if (!r.payDate) e.payDate = "First payment date is required";
+      if (!r.payDate) e.payDate = "Invoice date is required";
       else if (!isDate(r.payDate)) e.payDate = "Use a date like 2026-10-05";
       const amount = Number(r.amount);
       if (!r.amount) e.amount = "Amount is required";
@@ -183,7 +183,7 @@ export function validateRows(rows: ImportRow[], ctx: ImportContext): RowErrors[]
       if (r.collectedUpTo) {
         if (!isDate(r.collectedUpTo)) e.collectedUpTo = "Use a date like 2026-10-05";
         else if (r.collectedUpTo > ctx.today) e.collectedUpTo = "Can't be in the future";
-        else if (isDate(r.payDate) && r.collectedUpTo < r.payDate) e.collectedUpTo = "Is before the first payment date";
+        else if (isDate(r.payDate) && r.collectedUpTo < r.payDate) e.collectedUpTo = "Is before the invoice date";
       }
     }
 

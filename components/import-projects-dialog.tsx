@@ -145,7 +145,7 @@ export function ImportProjectsDialog({ employees, services, existing, canPay, cu
                 <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
                   <thead className="sticky top-0 z-10 bg-muted text-left text-xs text-muted-foreground">
                     <tr>
-                      {["#", "Project", "Client", "Website", "Onboarded", "Reporting", "Services", "Manager", "Team", "Onboarding notes", ...(canPay ? ["First payment", "Amount", "Currency", "Term", "Method", "Collected up to"] : []), "Status", ""].map((h) => (
+                      {["#", "Project", "Client", "Website", "Onboarded", "Reporting", "Services", "Manager", "Team", "Onboarding notes", ...(canPay ? ["Invoice date", "Amount", "Currency", "Term", "Method", "Collected up to"] : []), "Status", ""].map((h) => (
                         <th key={h} className="whitespace-nowrap border-b px-2 py-2 font-medium">{h}</th>
                       ))}
                     </tr>
