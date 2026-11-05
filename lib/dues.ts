@@ -20,6 +20,7 @@ export type Due = {
   method: PaymentMethod | null;
   status: "due" | "paid" | "void"; // void = removed by an admin; kept so the monthly job doesn't open it again
   paid_at: string | null;
+  split_from?: string | null; // the original date when this payment is an installment of a split
 };
 
 /** An active project with its payment plan. */

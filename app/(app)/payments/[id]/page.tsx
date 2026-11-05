@@ -8,7 +8,8 @@ import { formatMoney, formatTotals, minusTotals, sumByCurrency } from "@/lib/cur
 import { methodLabel, nextPaymentDate, termLabel, type PaymentPlan } from "@/lib/payments";
 import { daysUntil, todayISO } from "@/lib/reporting";
 import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
-import { restorePayment, undoPaid } from "@/app/actions";
+import { restorePayment, undoPaid, undoSplit } from "@/app/actions";
+import { SplitPaymentDialog } from "@/components/split-payment-dialog";
 import { EditPaidDate, MarkPaidForm, RemovePaymentButton } from "@/components/mark-paid-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +34,7 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
       scope,
       "id"
     ).maybeSingle<Project>(),
-    supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at").eq("project_id", id).order("due_date", { ascending: false }).returns<Due[]>(),
+    supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at, split_from").eq("project_id", id).order("due_date", { ascending: false }).returns<Due[]>(),
   ]);
   const error = projectRes.error ?? ledgerRes.error;
   if (error) {
@@ -51,6 +52,13 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
   const all = ledgerRes.data ?? [];
   const ledger = all.filter((d) => d.status !== "void"); // removed payments are listed separately at the bottom
   const removed = all.filter((d) => d.status === "void");
+  // Installments of a split: label each "1 of 2" in date order; a split can be undone while none of it is paid.
+  const groups = new Map<string, Due[]>();
+  for (const d of ledger) if (d.split_from) groups.set(d.split_from, [...(groups.get(d.split_from) ?? []), d].sort((a, b) => a.due_date.localeCompare(b.due_date)));
+  const installmentOf = (d: Due) => {
+    const g = d.split_from ? groups.get(d.split_from) : null;
+    return g ? `Installment ${g.findIndex((x) => x.due_date === d.due_date) + 1} of ${g.length}` : null;
+  };
   const billed = sumByCurrency(ledger, (d) => ({ amount: d.amount_usd, currency: d.currency }));
   const paid = sumByCurrency(ledger.filter((d) => d.status === "paid"), (d) => ({ amount: d.amount_usd, currency: d.currency }));
   const outstanding = minusTotals(billed, paid);
@@ -119,7 +127,17 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                   const overdue = d.status === "due" && d.due_date < today;
                   return (
                     <TableRow key={d.due_date}>
-                      <TableCell className="tabular-nums">{d.due_date}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {d.due_date}
+                        {installmentOf(d) && <span className="mt-0.5 block text-xs text-muted-foreground">{installmentOf(d)}</span>}
+                        {d.split_from === d.due_date && groups.get(d.split_from)?.every((x) => x.status === "due") && (
+                          <form action={undoSplit} className="mt-0.5">
+                            <input type="hidden" name="project_id" value={p.id} />
+                            <input type="hidden" name="due_date" value={d.due_date} />
+                            <button type="submit" className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Undo split</button>
+                          </form>
+                        )}
+                      </TableCell>
                       <TableCell className="tabular-nums">{formatMoney(d.amount_usd, d.currency)}</TableCell>
                       <TableCell>{termLabel(d.term) || "—"}</TableCell>
                       <TableCell>{methodLabel(d.method) || "—"}</TableCell>
@@ -154,11 +172,13 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                         ) : d.due_date > today ? (
                           <div className="flex flex-wrap items-center justify-end gap-2">
                             <span className="text-xs text-muted-foreground">Not due yet</span>
+                            {!d.split_from && <SplitPaymentDialog projectId={p.id} dueDate={d.due_date} amount={d.amount_usd} currency={d.currency || "USD"} />}
                             {isAdmin && <RemovePaymentButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} />}
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center justify-end gap-1">
                             <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
+                            {!d.split_from && <SplitPaymentDialog projectId={p.id} dueDate={d.due_date} amount={d.amount_usd} currency={d.currency || "USD"} />}
                             {isAdmin && <RemovePaymentButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} />}
                           </div>
                         )}

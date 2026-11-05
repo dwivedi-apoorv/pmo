@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { notifyAssigned, notifyPaymentPaid, notifyStatusChanged, notifyTeamChanged } from "@/lib/notify/run";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { isPaymentMethod, isPaymentTerm, projectionMonths } from "@/lib/payments";
+import { isPaymentMethod, isPaymentTerm, paymentDatesBetween, projectionMonths, type PaymentPlan } from "@/lib/payments";
 import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
 import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
@@ -582,6 +582,106 @@ export async function updatePaidDate(formData: FormData) {
   const name = await projectLabel(project_id);
   await logActivity({ actor: me, group: "payment", action: "payment_date_changed", projectId: project_id, projectName: name, summary: `${firstName(me.name)} changed the paid date of the ${money(row.amount_usd as number | null, row.currency as string | null)} payment for ${name} (due ${due_date}) from ${before} to ${paid_on}` });
 
+  revalidatePath("/");
+  revalidatePath("/payments");
+}
+
+const cents = (n: number) => Math.round(n * 100);
+
+/**
+ * Splits an unpaid payment into 2-3 installments, each with its own invoice date. The first installment keeps the
+ * original date (so the monthly job never opens that payment again); the others get new rows. The amounts must add
+ * up to the original. Admins and managers (payments access).
+ */
+export async function splitPayment(projectId: string, dueDate: string, parts: { date: string; amount: number }[]): Promise<{ ok: boolean; message: string }> {
+  try {
+    const access = await requirePermission("payments");
+    requireProject(access, projectId);
+    if (!DATE_RE.test(dueDate)) return { ok: false, message: "Missing due date." };
+    if (!Array.isArray(parts) || parts.length < 2 || parts.length > 3) return { ok: false, message: "Split into 2 or 3 installments." };
+
+    const { data: row, error: rErr } = await supabaseAdmin
+      .from("payment_dues")
+      .select("status, amount_usd, currency, term, method, split_from")
+      .eq("project_id", projectId)
+      .eq("due_date", dueDate)
+      .maybeSingle();
+    if (rErr) throw new Error(rErr.message);
+    if (!row) return { ok: false, message: "Payment not found." };
+    if (row.status !== "due") return { ok: false, message: "Only an unpaid payment can be split." };
+    if (row.split_from) return { ok: false, message: "This payment is already part of a split. Undo that split first." };
+
+    const clean = parts.map((p, i) => ({ date: i === 0 ? dueDate : String(p.date ?? ""), amount: cents(Number(p.amount)) / 100 }));
+    if (clean.some((p) => !DATE_RE.test(p.date) || !(p.amount > 0))) return { ok: false, message: "Every installment needs a date and an amount above zero." };
+    if (new Set(clean.map((p) => p.date)).size !== clean.length) return { ok: false, message: "Each installment needs a different date." };
+    const total = clean.reduce((n, p) => n + cents(p.amount), 0);
+    if (total !== cents(Number(row.amount_usd))) {
+      return { ok: false, message: `The installments add up to ${money(total / 100, row.currency as string | null)}, but the payment is ${money(Number(row.amount_usd), row.currency as string | null)}.` };
+    }
+
+    // New dates mustn't already have a payment, and mustn't be a day the regular schedule opens (it would be skipped).
+    const { data: project, error: pErr } = await supabaseAdmin.from("projects").select("payment_date, payment_term").eq("id", projectId).maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    const others = clean.slice(1);
+    const { data: clash, error: cErr } = await supabaseAdmin.from("payment_dues").select("due_date").eq("project_id", projectId).in("due_date", others.map((p) => p.date));
+    if (cErr) throw new Error(cErr.message);
+    if (clash?.length) return { ok: false, message: `There is already a payment on ${clash[0].due_date}. Choose a different date.` };
+    const onSchedule = others.find((p) => project && paymentDatesBetween(project as Pick<PaymentPlan, "payment_date" | "payment_term">, p.date, p.date).length > 0);
+    if (onSchedule) return { ok: false, message: `${onSchedule.date} is one of this project's regular invoice dates. Choose a different day.` };
+
+    const inserted: string[] = [];
+    for (const p of others) {
+      const { error } = await supabaseAdmin.from("payment_dues").insert({
+        project_id: projectId, due_date: p.date, amount_usd: p.amount, currency: row.currency ?? "USD",
+        term: row.term, method: row.method, status: "due", source: "manual", split_from: dueDate,
+      });
+      if (error) {
+        if (inserted.length) await supabaseAdmin.from("payment_dues").delete().eq("project_id", projectId).in("due_date", inserted);
+        throw new Error(error.message);
+      }
+      inserted.push(p.date);
+    }
+    const { error: uErr } = await supabaseAdmin.from("payment_dues").update({ amount_usd: clean[0].amount, split_from: dueDate }).eq("project_id", projectId).eq("due_date", dueDate).eq("status", "due");
+    if (uErr) {
+      await supabaseAdmin.from("payment_dues").delete().eq("project_id", projectId).in("due_date", inserted);
+      throw new Error(uErr.message);
+    }
+
+    const name = await projectLabel(projectId);
+    const cur = row.currency as string | null;
+    await logActivity({ actor: access.user, group: "payment", action: "payment_split", projectId, projectName: name, summary: `${firstName(access.user.name)} split the ${money(Number(row.amount_usd), cur)} payment for ${name} (due ${dueDate}) into ${clean.map((p) => `${money(p.amount, cur)} on ${p.date}`).join(" and ")}` });
+    revalidatePath("/");
+    revalidatePath("/payments");
+    return { ok: true, message: "Split into installments." };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** Puts a split back together while none of its installments is paid: the extra installments are deleted and the first gets the full amount. */
+export async function undoSplit(formData: FormData) {
+  const access = await requirePermission("payments");
+  const projectId = str(formData.get("project_id"));
+  requireProject(access, projectId);
+  const from = str(formData.get("due_date"));
+  if (!projectId || !DATE_RE.test(from)) throw new Error("Missing project or date.");
+
+  const { data: rows, error } = await supabaseAdmin.from("payment_dues").select("due_date, amount_usd, currency, status").eq("project_id", projectId).eq("split_from", from);
+  if (error) throw new Error(error.message);
+  if (!rows?.length) return;
+  if (rows.some((r) => r.status === "paid")) throw new Error("An installment is already paid, so this split can't be undone.");
+
+  const total = rows.filter((r) => r.status === "due").reduce((n, r) => n + cents(Number(r.amount_usd)), 0) / 100;
+  const extra = rows.filter((r) => r.due_date !== from).map((r) => r.due_date as string);
+  if (extra.length) {
+    const { error: dErr } = await supabaseAdmin.from("payment_dues").delete().eq("project_id", projectId).in("due_date", extra);
+    if (dErr) throw new Error(dErr.message);
+  }
+  const { error: uErr } = await supabaseAdmin.from("payment_dues").update({ amount_usd: total, split_from: null }).eq("project_id", projectId).eq("due_date", from);
+  if (uErr) throw new Error(uErr.message);
+
+  const name = await projectLabel(projectId);
+  await logActivity({ actor: access.user, group: "payment", action: "payment_split_undone", projectId, projectName: name, summary: `${firstName(access.user.name)} undid the split of the ${money(total, rows[0].currency as string | null)} payment for ${name} (due ${from})` });
   revalidatePath("/");
   revalidatePath("/payments");
 }
