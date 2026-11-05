@@ -16,7 +16,6 @@ import { RevenueSummary } from "@/components/revenue-summary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
@@ -57,20 +56,6 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const rows = monthItems(month, active, ledger, labelOf, isCurrent);
   const expected = sumByCurrency(rows, (it) => it);
   const received = sumByCurrency(rows.filter((it) => it.paid), (it) => it);
-
-  // Month by month: every month the ledger has rows for (up to now), newest first.
-  const monthKeys = [...new Set([currentKey, ...ledger.filter((d) => d.status !== "void").map((d) => d.due_date.slice(0, 7))])]
-    .filter((k) => k <= currentKey)
-    .sort()
-    .reverse();
-  const history = monthKeys.map((key) => {
-    const m = projectionMonths(`${key}-01`, 1)[0];
-    const items = monthItems(m, active, ledger, labelOf, key === currentKey);
-    const billed = sumByCurrency(items, (it) => it);
-    const collected = sumByCurrency(items.filter((it) => it.paid), (it) => it);
-    const outstanding = minusTotals(billed, collected);
-    return { key, label: m.label, count: items.length, billed, collected, outstanding, owing: Object.values(outstanding).some((v) => v > 0.004) };
-  });
 
   const prevKey = shiftMonth(month.key, -1);
   const nextKey = shiftMonth(month.key, 1);
@@ -177,44 +162,6 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
               })}
             </ul>
           )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Month by month</CardTitle>
-          <CardDescription>Real revenue from the ledger. Click a month to see its payments.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Month</TableHead>
-                <TableHead className="text-right">Payments</TableHead>
-                <TableHead className="text-right">Billed</TableHead>
-                <TableHead className="text-right">Collected</TableHead>
-                <TableHead className="text-right">Outstanding</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {history.map((h) => (
-                <TableRow key={h.key} className={h.key === month.key ? "bg-muted/50" : ""}>
-                  <TableCell className="font-medium">
-                    <Link href={monthHref(h.key)} className="underline-offset-4 hover:underline">
-                      {h.label}
-                    </Link>
-                    {h.key === currentKey && <span className="ml-2 text-xs text-muted-foreground">this month</span>}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{h.count}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatTotals(h.billed)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{formatTotals(h.collected)}</TableCell>
-                  <TableCell className={`text-right tabular-nums ${h.owing ? "font-medium text-destructive" : ""}`}>
-                    {formatTotals(h.outstanding)}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
         </CardContent>
       </Card>
     </div>

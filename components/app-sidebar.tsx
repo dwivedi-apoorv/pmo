@@ -26,7 +26,10 @@ import { signOut } from "@/app/(auth)/login/actions";
 const PAGES = [
   { title: "Dashboard", href: "/", icon: LayoutDashboardIcon },
   { title: "Projects", href: "/projects", icon: BriefcaseIcon },
-  { title: "Payments", href: "/payments", icon: WalletIcon },
+  { title: "Payments", href: "/payments", icon: WalletIcon, children: [
+    { title: "Payments", href: "/payments" },
+    { title: "Month by month", href: "/payments/monthly" },
+  ] },
   { title: "Reports", href: "/reports", icon: FileTextIcon },
   { title: "Onboarding", href: "/onboarding", icon: UserRoundPlusIcon },
   { title: "Employees", href: "/people", icon: UsersIcon },
@@ -46,6 +49,9 @@ export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name:
   const inSettings = SETTINGS_PAGES.some((p) => pathname.startsWith(p.href));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const showSettings = settingsOpen || inSettings; // always open while you're on one of its pages
+  const [paymentsOpen, setPaymentsOpen] = useState(false);
+  const inPayments = pathname.startsWith("/payments");
+  const showPayments = paymentsOpen || inPayments;
 
   return (
     <Sidebar collapsible="offcanvas">
@@ -61,6 +67,28 @@ export function AppSidebar({ user, admin = false, hidden = [] }: { user: { name:
             <SidebarMenu>
               {PAGES.filter((p) => !hidden.includes(p.href)).map((item) => {
                 const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+                if (item.children) {
+                  return (
+                    <SidebarMenuItem key={item.href}>
+                      <SidebarMenuButton isActive={inPayments} aria-expanded={showPayments} onClick={() => setPaymentsOpen(!showPayments)}>
+                        <item.icon />
+                        <span>{item.title}</span>
+                        <ChevronDownIcon className={`ml-auto transition-transform ${showPayments ? "rotate-180" : ""}`} />
+                      </SidebarMenuButton>
+                      {showPayments && (
+                        <SidebarMenuSub>
+                          {item.children.map((child) => (
+                            <SidebarMenuSubItem key={child.href}>
+                              <SidebarMenuSubButton isActive={pathname === child.href || (child.href === "/payments" && inPayments && pathname !== "/payments/monthly")} render={<Link href={child.href} />}>
+                                <span>{child.title}</span>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      )}
+                    </SidebarMenuItem>
+                  );
+                }
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton isActive={active} render={<Link href={item.href} />}>
