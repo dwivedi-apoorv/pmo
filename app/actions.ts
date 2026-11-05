@@ -11,7 +11,7 @@ import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
 import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
 import { sendEmail } from "@/lib/email";
-import { createProjectChat, getAutoProjectChat } from "@/lib/notify/project-chat";
+import { createProjectChat } from "@/lib/notify/project-chat";
 import { getMethod } from "@/lib/notify/send";
 import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
@@ -196,6 +196,7 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
     );
   }
 
+  const wantChat = formData.get("create_chat") === "on";
   const onboardingNotes = str(formData.get("onboarding_notes"));
   if (onboardingNotes) {
     const { error: nErr } = await supabaseAdmin.rpc("add_project_note", {
@@ -216,8 +217,8 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
     if (added.length && opts.notify) after(() => notifyAssigned(data.id, added)); // after the response, so saving never waits on Teams
     if (opts.notify) {
       after(async () => {
-        // The Teams group chat for the project, if that's switched on in General settings.
-        if ((await getAutoProjectChat()) && (await getMethod()) !== "off") await createProjectChat(data.id, me);
+        // The Teams group chat, only when "Create a Teams group chat" was ticked on the form.
+        if (wantChat && (await getMethod()) !== "off") await createProjectChat(data.id, me);
       });
     }
   } catch (e) {

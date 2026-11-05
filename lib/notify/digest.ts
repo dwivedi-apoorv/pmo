@@ -34,7 +34,6 @@ export function buildDigests(input: {
   ledger: Due[];
   sends: ReportSend[];
   employees: DigestEmployee[];
-  appUrl: string;
   today?: string;
   include?: { reports: boolean; payments: boolean }; // default: both
 }): Map<string, Notice> {
@@ -80,7 +79,6 @@ export function buildDigests(input: {
     out.set(id, {
       title: `PMO summary for ${e.name.split(" ")[0]} · ${weekday(today)}`,
       sections,
-      link: { label: "Open the PMO", url: input.appUrl },
     });
   }
   return out;

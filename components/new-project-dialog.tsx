@@ -25,6 +25,7 @@ export function NewProjectDialog({
   services,
   showPayment = true,
   currencies = ["USD", "CAD"],
+  chat,
   open,
   onOpenChange: setOpen,
 }: {
@@ -33,6 +34,8 @@ export function NewProjectDialog({
   services: Service[];
   showPayment?: boolean;
   currencies?: string[];
+  /** The "Create a Teams group chat" tick box: hidden when Teams delivery is off; ticked by default per General settings. */
+  chat?: { available: boolean; defaultOn: boolean };
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -78,6 +81,15 @@ export function NewProjectDialog({
             />
           </div>
 
+          {chat?.available && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+              <input type="checkbox" name="create_chat" defaultChecked={chat.defaultOn} className="mt-1" />
+              <span>
+                <span className="block text-sm font-medium">Create a Teams group chat for this project</span>
+                <span className="block text-sm text-muted-foreground">With the manager and team, and the project details as the first message. Untick it if the project already has a group.</span>
+              </span>
+            </label>
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" disabled={pending}>
             {pending ? "Creating…" : "Create project"}

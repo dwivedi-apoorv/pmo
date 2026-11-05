@@ -28,6 +28,8 @@ import { RiskNote } from "@/components/risk-note";
 import { ProjectStatusMenu } from "@/components/project-status-menu";
 import { PageHeader } from "@/components/page-header";
 import { formatMoney, currencyOrder } from "@/lib/currency";
+import { getAutoProjectChat } from "@/lib/notify/project-chat";
+import { getMethod } from "@/lib/notify/send";
 import { NewProjectButton } from "@/components/new-project-button";
 import { ImportProjectsDialog } from "@/components/import-projects-dialog";
 import { rowKey } from "@/lib/import-projects";
@@ -85,6 +87,9 @@ export default async function ProjectsPage({
   const riskOnly = sp.risk === "1"; // quick filter: only active projects that are at risk
   const hidden = parseHidden((await cookies()).get(HIDDEN_COLUMNS_COOKIE)?.value);
   const show = (id: ColumnId) => !hidden.has(id);
+
+  // The "Create a Teams group chat" tick box on the New project form.
+  const chatOption = canManage ? { available: (await getMethod()) !== "off", defaultOn: await getAutoProjectChat() } : undefined;
 
   const [projectsRes, peopleRes, ledgerRes, currenciesRes, chatsRes, reasonsRes, statusRes, historyRes, sendsRes, servicesRes, notesRes, versionsRes] = await Promise.all([
     limitTo(
@@ -212,7 +217,7 @@ export default async function ProjectsPage({
                 currencies={currencyCodes}
                 today={todayISO()}
               />
-              <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} currencies={currencyCodes} />
+              <NewProjectButton employees={assignable} managers={managers} services={servicesRes.data ?? []} showPayment={canPay} currencies={currencyCodes} chat={chatOption} />
             </div>
           ) : undefined
         }

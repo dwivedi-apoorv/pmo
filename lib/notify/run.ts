@@ -1,6 +1,5 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { appUrl } from "@/lib/ms/config";
 import { todayISO } from "@/lib/reporting";
 import type { Due } from "@/lib/dues";
 import type { ReportSend } from "@/lib/reports";
@@ -79,7 +78,6 @@ async function runDigestInner(opts: { force?: boolean }): Promise<DigestRun> {
     ledger: ledgerRes.data ?? [],
     sends: sendsRes.data ?? [],
     employees,
-    appUrl: appUrl(),
     include: { reports: !off.has("reports"), payments: !off.has("payments") },
   });
 

@@ -140,8 +140,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
               <input type="checkbox" name="auto" defaultChecked={autoChat} className="mt-1" />
               <span>
-                <span className="block text-sm font-medium">Create a group chat automatically when a project is created</span>
-                <span className="block text-sm text-muted-foreground">Needs a connected Microsoft account. Projects added by Excel import don&apos;t get one automatically, and nothing is created while delivery is Off.</span>
+                <span className="block text-sm font-medium">Tick &ldquo;Create a Teams group chat&rdquo; by default on the New project form</span>
+                <span className="block text-sm text-muted-foreground">The form always lets you choose per project, so a project whose group already exists can be left out. Needs a connected Microsoft account. Projects added by Excel import never get one automatically, and nothing is created while delivery is Off.</span>
               </span>
             </label>
             <div><Button type="submit">Save</Button></div>
