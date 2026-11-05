@@ -2,6 +2,7 @@ import "server-only";
 import { firstName, logActivity } from "@/lib/activity";
 import { alertAdmins } from "@/lib/alerts";
 import { createGroupChat, lookupUserId, sendChatMessage } from "@/lib/ms/user";
+import { parseChatLink } from "@/lib/chat-link";
 import { toHtml } from "@/lib/notify/notice";
 import { assignedNotice } from "@/lib/notify/project";
 import { loadAssignedDetails } from "@/lib/notify/run";
@@ -98,4 +99,55 @@ async function createProjectChatInner(projectId: string, by: { id: string; name:
     console.error("[chat] could not create the project chat:", e instanceof Error ? e.message : e);
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
   }
+}
+
+/**
+ * Links a Teams group chat that already exists (made by hand) to a project, from its pasted link. Nothing is created in Teams.
+ * With `post`, the project's details are posted in it as the first message, which also shows whether the connected account
+ * can post there (it has to be a member of the group). Never throws.
+ */
+export async function linkExistingChat(projectId: string, link: string, post: boolean, by: { id: string; name: string }): Promise<ChatResult> {
+  try {
+    const parsed = parseChatLink(link);
+    if (!parsed) return { ok: false, message: "That doesn't look like a Teams group chat link. In Teams open the group, choose ⋯ then \"Get link to chat\", and paste it here." };
+
+    const { data: project } = await supabaseAdmin.from("projects").select("name").eq("id", projectId).maybeSingle();
+    if (!project) return { ok: false, message: "Project not found." };
+    const { data: mine } = await supabaseAdmin.from("project_chats").select("project_id").eq("project_id", projectId).maybeSingle();
+    if (mine) return { ok: false, message: "This project already has a Teams chat. Unlink it first to use a different one." };
+    const { data: taken } = await supabaseAdmin.from("project_chats").select("project_id").eq("chat_id", parsed.id).maybeSingle();
+    if (taken) {
+      const other = (await supabaseAdmin.from("projects").select("name").eq("id", taken.project_id as string).maybeSingle()).data?.name as string | undefined;
+      return { ok: false, message: `That chat is already linked to ${other ?? "another project"}.` };
+    }
+
+    const { error } = await supabaseAdmin.from("project_chats").insert({ project_id: projectId, chat_id: parsed.id, web_url: parsed.url });
+    if (error) return { ok: false, message: error.message };
+    await logActivity({ actor: by, group: "project", action: "chat_linked", projectId, projectName: project.name as string, summary: `${firstName(by.name)} linked an existing Teams group chat to ${project.name}` });
+
+    let posted = "";
+    if (post) {
+      const details = await loadAssignedDetails(projectId);
+      const sender = await Sender.open();
+      const account = await sender.account();
+      if (!details) posted = " The project details couldn't be loaded, so nothing was posted.";
+      else if ("error" in account) posted = ` The details weren't posted: ${account.error}`;
+      else {
+        const r = await sendChatMessage(account.token, parsed.id, toHtml(assignedNotice(details)));
+        posted = r.ok ? " The project details were posted in the chat." : ` The details couldn't be posted (the connected Microsoft account needs to be a member of the group): ${r.error}`;
+      }
+    }
+    return { ok: true, created: false, webUrl: parsed.url, message: `Linked the Teams chat to ${project.name}.${posted}` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** Removes a project's link to its Teams chat. The chat itself is untouched in Teams. */
+export async function unlinkProjectChat(projectId: string, by: { id: string; name: string }): Promise<ChatResult> {
+  const { data: project } = await supabaseAdmin.from("projects").select("name").eq("id", projectId).maybeSingle();
+  const { error } = await supabaseAdmin.from("project_chats").delete().eq("project_id", projectId);
+  if (error) return { ok: false, message: error.message };
+  await logActivity({ actor: by, group: "project", action: "chat_unlinked", projectId, projectName: project?.name as string | undefined, summary: `${firstName(by.name)} unlinked the Teams chat from ${project?.name ?? "a project"}` });
+  return { ok: true, message: "Unlinked. The chat itself is still in Teams." };
 }

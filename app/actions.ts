@@ -11,7 +11,7 @@ import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
 import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
 import { sendEmail } from "@/lib/email";
-import { createProjectChat } from "@/lib/notify/project-chat";
+import { createProjectChat, linkExistingChat, unlinkProjectChat } from "@/lib/notify/project-chat";
 import { getMethod } from "@/lib/notify/send";
 import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
 import { employeeNames, firstName, list, logActivity } from "@/lib/activity";
@@ -1055,6 +1055,32 @@ export async function deleteProject(input: { projectId: string; typedName: strin
     revalidatePath("/payments");
     revalidatePath("/onboarding");
     return { ok: true, message: `${summary.name} was deleted.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** "Link existing Teams chat" on a project: attaches a group made by hand, from its pasted link. */
+export async function linkProjectChatNow(projectId: string, link: string, post: boolean): Promise<{ ok: boolean; message: string; webUrl?: string | null }> {
+  try {
+    const access = await requirePermission("manage_projects");
+    requireProject(access, projectId);
+    const r = await linkExistingChat(projectId, link, post, access.user);
+    revalidatePath("/projects");
+    return r;
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** "Unlink Teams chat": forgets the link (the chat stays in Teams). */
+export async function unlinkProjectChatNow(projectId: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const access = await requirePermission("manage_projects");
+    requireProject(access, projectId);
+    const r = await unlinkProjectChat(projectId, access.user);
+    revalidatePath("/projects");
+    return r;
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
   }

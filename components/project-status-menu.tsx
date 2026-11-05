@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { CheckCircle2Icon, CircleStopIcon, MessagesSquareIcon, MoreHorizontalIcon, Trash2Icon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
+import { CheckCircle2Icon, CircleStopIcon, LinkIcon, MessagesSquareIcon, MoreHorizontalIcon, UnlinkIcon, Trash2Icon, PauseIcon, PlayIcon, RotateCcwIcon, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -16,13 +16,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ReasonPicker } from "@/components/reason-picker";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { reasonRequired, type ProjectStatus } from "@/lib/status";
-import { changeProjectStatus, createProjectChatNow } from "@/app/actions";
+import { changeProjectStatus, createProjectChatNow, linkProjectChatNow, unlinkProjectChatNow } from "@/app/actions";
 
 // What each move does, in the words shown to the user.
 const MOVES: Record<
@@ -99,6 +100,9 @@ export function ProjectStatusMenu({
   const [move, setMove] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [chatMessage, setChatMessage] = useState<string | null>(null);
+  const [linking, setLinking] = useState(false);
+  const [chatLink, setChatLink] = useState("");
+  const [postDetails, setPostDetails] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -146,23 +150,44 @@ export function ProjectStatusMenu({
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          {hasChat && chatUrl ? (
-            <DropdownMenuItem render={<a href={chatUrl} target="_blank" rel="noreferrer" />}>
-              <MessagesSquareIcon />
-              Open Teams chat
-            </DropdownMenuItem>
+          {hasChat ? (
+            <>
+              {chatUrl && (
+                <DropdownMenuItem render={<a href={chatUrl} target="_blank" rel="noreferrer" />}>
+                  <MessagesSquareIcon />
+                  Open Teams chat
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                onClick={() =>
+                  startTransition(async () => {
+                    const r = await unlinkProjectChatNow(id);
+                    setChatMessage(r.message);
+                  })
+                }
+              >
+                <UnlinkIcon />
+                Unlink Teams chat
+              </DropdownMenuItem>
+            </>
           ) : (
-            <DropdownMenuItem
-              onClick={() =>
-                startTransition(async () => {
-                  const r = await createProjectChatNow(id);
-                  setChatMessage(r.message);
-                })
-              }
-            >
-              <MessagesSquareIcon />
-              {hasChat ? "Teams chat exists" : "Create Teams chat"}
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem
+                onClick={() =>
+                  startTransition(async () => {
+                    const r = await createProjectChatNow(id);
+                    setChatMessage(r.message);
+                  })
+                }
+              >
+                <MessagesSquareIcon />
+                Create Teams chat
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setLinking(true)}>
+                <LinkIcon />
+                Link existing chat…
+              </DropdownMenuItem>
+            </>
           )}
           {canDelete && (
             <>
@@ -181,6 +206,40 @@ export function ProjectStatusMenu({
             <DialogTitle>Teams chat for “{name}”</DialogTitle>
             <DialogDescription className="whitespace-pre-wrap">{chatMessage}</DialogDescription>
           </DialogHeader>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={linking} onOpenChange={(o) => { if (!o) { setLinking(false); setChatLink(""); setPostDetails(false); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Link an existing Teams chat to “{name}”</DialogTitle>
+            <DialogDescription>
+              In Teams, open the group, choose ⋯ then “Get link to chat”, and paste the link. Nothing is created or changed in Teams.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              startTransition(async () => {
+                const r = await linkProjectChatNow(id, chatLink, postDetails);
+                setChatMessage(r.message);
+                if (r.ok) { setLinking(false); setChatLink(""); setPostDetails(false); }
+              });
+            }}
+          >
+            <div className="grid gap-1.5">
+              <Label htmlFor={`chat-link-${id}`}>Chat link</Label>
+              <Input id={`chat-link-${id}`} value={chatLink} onChange={(e) => setChatLink(e.target.value)} placeholder="https://teams.microsoft.com/l/chat/19:…@thread.v2/…" required />
+            </div>
+            <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+              <input type="checkbox" checked={postDetails} onChange={(e) => setPostDetails(e.target.checked)} className="mt-1" />
+              <span>
+                Post the project details in the chat
+                <span className="block text-xs text-muted-foreground">Also checks that the connected Microsoft account can post there. It has to be a member of the group.</span>
+              </span>
+            </label>
+            <Button type="submit" disabled={pending || !chatLink.trim()}>{pending ? "Linking…" : "Link chat"}</Button>
+          </form>
         </DialogContent>
       </Dialog>
       {canDelete && <DeleteProjectDialog id={id} name={name} open={deleting} onOpenChange={setDeleting} />}
