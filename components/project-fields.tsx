@@ -95,7 +95,7 @@ export function ProjectFields({ values, showPayment = true, currencies = ["USD",
       {showPayment && (
       <div className="grid gap-3 border-t pt-4">
         <p className="text-sm font-medium">Payment</p>
-        <div className="grid gap-3 sm:grid-cols-5">
+        <div className="grid gap-3 sm:grid-cols-3 [&>*]:min-w-0">
           <div className="grid gap-1.5">
             <Label htmlFor="payment_date">Invoice date</Label>
             <Input
