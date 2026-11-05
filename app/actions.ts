@@ -510,6 +510,7 @@ export async function markPaid(formData: FormData) {
   };
   if (existing) {
     if (existing.status === "paid") return; // already paid, nothing to do
+    if (existing.status === "void") throw new Error("This payment was removed. Restore it first if it should be paid.");
     // Keep the amount the due was opened with; only flip it to paid.
     const { error } = await supabaseAdmin
       .from("payment_dues")
@@ -580,6 +581,47 @@ export async function updatePaidDate(formData: FormData) {
   const name = await projectLabel(project_id);
   await logActivity({ actor: me, group: "payment", action: "payment_date_changed", projectId: project_id, projectName: name, summary: `${firstName(me.name)} changed the paid date of the ${money(row.amount_usd as number | null, row.currency as string | null)} payment for ${name} (due ${due_date}) from ${before} to ${paid_on}` });
 
+  revalidatePath("/");
+  revalidatePath("/payments");
+}
+
+/** Removes an unpaid payment (admins only). The row is kept as 'void' so it isn't opened again; Restore brings it back. */
+export async function removePayment(formData: FormData) {
+  const access = await requireAdmin();
+  const me = access.user;
+  const project_id = str(formData.get("project_id"));
+  const due_date = str(formData.get("due_date"));
+  if (!project_id || !DATE_RE.test(due_date)) throw new Error("Missing project or due date.");
+
+  const { data: row, error: rErr } = await supabaseAdmin.from("payment_dues").select("status, amount_usd, currency").eq("project_id", project_id).eq("due_date", due_date).maybeSingle();
+  if (rErr) throw new Error(rErr.message);
+  if (!row) throw new Error("Payment not found.");
+  if (row.status === "paid") throw new Error("A paid payment can't be removed. Undo it first.");
+  if (row.status === "void") return;
+
+  const { error } = await supabaseAdmin.from("payment_dues").update({ status: "void" }).eq("project_id", project_id).eq("due_date", due_date).eq("status", "due");
+  if (error) throw new Error(error.message);
+  const name = await projectLabel(project_id);
+  await logActivity({ actor: me, group: "payment", action: "payment_removed", projectId: project_id, projectName: name, summary: `${firstName(me.name)} removed the ${money(row.amount_usd as number | null, row.currency as string | null)} payment for ${name} (due ${due_date})` });
+  revalidatePath("/");
+  revalidatePath("/payments");
+}
+
+/** Brings a removed payment back as unpaid (admins only). */
+export async function restorePayment(formData: FormData) {
+  const access = await requireAdmin();
+  const me = access.user;
+  const project_id = str(formData.get("project_id"));
+  const due_date = str(formData.get("due_date"));
+  if (!project_id || !DATE_RE.test(due_date)) throw new Error("Missing project or due date.");
+
+  const { data: row, error: rErr } = await supabaseAdmin.from("payment_dues").select("status, amount_usd, currency").eq("project_id", project_id).eq("due_date", due_date).maybeSingle();
+  if (rErr) throw new Error(rErr.message);
+  if (!row || row.status !== "void") return;
+  const { error } = await supabaseAdmin.from("payment_dues").update({ status: "due" }).eq("project_id", project_id).eq("due_date", due_date).eq("status", "void");
+  if (error) throw new Error(error.message);
+  const name = await projectLabel(project_id);
+  await logActivity({ actor: me, group: "payment", action: "payment_restored", projectId: project_id, projectName: name, summary: `${firstName(me.name)} restored the ${money(row.amount_usd as number | null, row.currency as string | null)} payment for ${name} (due ${due_date})` });
   revalidatePath("/");
   revalidatePath("/payments");
 }
@@ -955,9 +997,10 @@ export async function getDeleteSummary(projectId: string): Promise<{ ok: true; n
       count("report_log"), count("project_notes"), count("project_status_log"), count("project_team_history"), count("activity_log"),
     ]);
     if (!p) return { ok: false, error: "Project not found." };
-    const paid = (dues ?? []).filter((d) => d.status === "paid");
+    const real = (dues ?? []).filter((d) => d.status !== "void");
+    const paid = real.filter((d) => d.status === "paid");
     return {
-      ok: true, name: p.name as string, client: p.client_name as string, payments: (dues ?? []).length, paid: paid.length,
+      ok: true, name: p.name as string, client: p.client_name as string, payments: real.length, paid: paid.length,
       paidTotal: formatTotals(paid.reduce<Totals>((t, d) => addTo(t, d.currency as string | null, Number(d.amount_usd ?? 0)), {})), reports, notes, statusChanges, teamHistory, activity,
     };
   } catch (e) {

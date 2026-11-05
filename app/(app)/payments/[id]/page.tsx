@@ -8,8 +8,8 @@ import { formatMoney, formatTotals, minusTotals, sumByCurrency } from "@/lib/cur
 import { methodLabel, nextPaymentDate, termLabel, type PaymentPlan } from "@/lib/payments";
 import { daysUntil, todayISO } from "@/lib/reporting";
 import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
-import { undoPaid } from "@/app/actions";
-import { EditPaidDate, MarkPaidForm } from "@/components/mark-paid-form";
+import { restorePayment, undoPaid } from "@/app/actions";
+import { EditPaidDate, MarkPaidForm, RemovePaymentButton } from "@/components/mark-paid-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,8 @@ type Project = { id: string; name: string; client_name: string; status: ProjectS
 
 // One client's payment history: the plan, the totals, and every payment in the ledger, newest first.
 export default async function PaymentHistoryPage({ params }: { params: Promise<{ id: string }> }) {
-  const { scope } = await requirePagePermission("payments");
+  const { scope, role } = await requirePagePermission("payments");
+  const isAdmin = role === "admin";
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id) || (scope && !scope.includes(id))) notFound();
 
@@ -47,13 +48,15 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
   if (!p) notFound();
 
   const today = todayISO();
-  const ledger = ledgerRes.data ?? [];
+  const all = ledgerRes.data ?? [];
+  const ledger = all.filter((d) => d.status !== "void"); // removed payments are listed separately at the bottom
+  const removed = all.filter((d) => d.status === "void");
   const billed = sumByCurrency(ledger, (d) => ({ amount: d.amount_usd, currency: d.currency }));
   const paid = sumByCurrency(ledger.filter((d) => d.status === "paid"), (d) => ({ amount: d.amount_usd, currency: d.currency }));
   const outstanding = minusTotals(billed, paid);
   const owing = Object.values(outstanding).some((v) => v > 0.004);
   const next = p.status === "active" ? nextPaymentDate(p, today) : null;
-  const upcoming = next && !ledger.some((d) => d.due_date === next) ? next : null;
+  const upcoming = next && !all.some((d) => d.due_date === next) ? next : null;
   const paidDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }) : "—");
 
   return (
@@ -149,9 +152,15 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                             </form>
                           </div>
                         ) : d.due_date > today ? (
-                          <span className="text-xs text-muted-foreground">Not due yet</span>
+                          <div className="flex flex-wrap items-center justify-end gap-2">
+                            <span className="text-xs text-muted-foreground">Not due yet</span>
+                            {isAdmin && <RemovePaymentButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} />}
+                          </div>
                         ) : (
-                          <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
+                            {isAdmin && <RemovePaymentButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} />}
+                          </div>
                         )}
                       </TableCell>
                     </TableRow>
@@ -162,6 +171,35 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
           )}
         </CardContent>
       </Card>
+      {removed.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Removed payments
+              <span className="ml-2 text-sm font-normal text-muted-foreground">{removed.length}</span>
+            </CardTitle>
+            <CardDescription>Removed by an admin. They don't count as owed, overdue or billed.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="divide-y text-sm">
+              {removed.map((d) => (
+                <li key={d.due_date} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 first:pt-0 last:pb-0 text-muted-foreground">
+                  <span className="w-24 tabular-nums">{d.due_date}</span>
+                  <span className="tabular-nums">{formatMoney(d.amount_usd, d.currency)}</span>
+                  <Badge variant="outline">Removed</Badge>
+                  {isAdmin && (
+                    <form action={restorePayment} className="ml-auto">
+                      <input type="hidden" name="project_id" value={p.id} />
+                      <input type="hidden" name="due_date" value={d.due_date} />
+                      <Button type="submit" size="sm" variant="ghost">Restore</Button>
+                    </form>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

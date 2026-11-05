@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { markPaid, updatePaidDate } from "@/app/actions";
+import { markPaid, removePayment, updatePaidDate } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -49,6 +49,22 @@ export function EditPaidDate({ projectId, dueDate, current }: { projectId: strin
       <Input type="date" name="paid_on" defaultValue={current} max={todayIST()} required className="h-8 w-36" aria-label="Paid on" />
       <Button type="submit" size="sm">Save</Button>
       <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
+// Admin-only: removes an unpaid payment after a confirmation (it's kept as "removed" and can be restored).
+export function RemovePaymentButton({ projectId, dueDate, label }: { projectId: string; dueDate: string; label: string }) {
+  return (
+    <form
+      action={removePayment}
+      onSubmit={(e) => {
+        if (!window.confirm(`Remove the payment due ${dueDate} (${label})?\n\nIt won't count as owed or overdue any more. You can restore it later.`)) e.preventDefault();
+      }}
+    >
+      <input type="hidden" name="project_id" value={projectId} />
+      <input type="hidden" name="due_date" value={dueDate} />
+      <Button type="submit" size="sm" variant="ghost" className="text-destructive hover:text-destructive">Remove</Button>
     </form>
   );
 }

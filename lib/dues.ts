@@ -18,7 +18,7 @@ export type Due = {
   currency?: string | null;
   term: PaymentTerm | null;
   method: PaymentMethod | null;
-  status: "due" | "paid";
+  status: "due" | "paid" | "void"; // void = removed by an admin; kept so the monthly job doesn't open it again
   paid_at: string | null;
 };
 
@@ -110,7 +110,7 @@ export function monthItems(
 ): ProjectionItem[] {
   const byKey = index(ledger);
   const fromLedger = ledger
-    .filter((d) => d.due_date >= month.start && d.due_date <= month.end)
+    .filter((d) => d.status !== "void" && d.due_date >= month.start && d.due_date <= month.end)
     .map((d) => ({ project_id: d.project_id, project: label(d.project_id), date: d.due_date, amount: d.amount_usd, currency: d.currency || "USD", paid: d.status === "paid" }));
   const forecast = includeUnopened
     ? active.flatMap((p) =>

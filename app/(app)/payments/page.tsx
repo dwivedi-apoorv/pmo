@@ -59,7 +59,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const received = sumByCurrency(rows.filter((it) => it.paid), (it) => it);
 
   // Month by month: every month the ledger has rows for (up to now), newest first.
-  const monthKeys = [...new Set([currentKey, ...ledger.map((d) => d.due_date.slice(0, 7))])]
+  const monthKeys = [...new Set([currentKey, ...ledger.filter((d) => d.status !== "void").map((d) => d.due_date.slice(0, 7))])]
     .filter((k) => k <= currentKey)
     .sort()
     .reverse();

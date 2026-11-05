@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 030) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 031) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -44,7 +44,7 @@ create table payment_dues (
   amount_usd numeric(12, 2) not null default 0 check (amount_usd >= 0),
   term       text check (term in ('one_off', 'monthly', 'quarterly', 'biannual')),   -- plan when the due was created
   method     text check (method in ('subscription', 'stripe_link', 'bank_wire')),    -- plan when the due was created
-  status     text not null default 'due' check (status in ('due', 'paid')),
+  status     text not null default 'due' check (status in ('due', 'paid', 'void')),   -- 'void' = removed by an admin (kept so it isn't opened again)
   paid_at    timestamptz,
   source     text not null default 'cron' check (source in ('cron', 'manual', 'migrated', 'backfill')),
   created_at timestamptz not null default now(),
