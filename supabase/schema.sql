@@ -1,5 +1,5 @@
 -- Fresh install: Supabase > SQL Editor > New query > paste > Run.
--- Already have a database? Run the numbered files in supabase/ (migration-002 ... 032) instead.
+-- Already have a database? Run the numbered files in supabase/ (migration-002 ... 033) instead.
 
 create table employees (
   id         uuid primary key default gen_random_uuid(),
@@ -876,3 +876,10 @@ insert into currencies (code) values ('USD'), ('CAD') on conflict do nothing;
 
 alter table projects     add column if not exists currency text not null default 'USD' references currencies(code) on update cascade;
 alter table payment_dues add column if not exists currency text not null default 'USD' references currencies(code) on update cascade;
+
+-- ---- Send a Stripe invoice from the app (migration-033) ----
+alter table projects     add column if not exists billing_email      text;
+alter table projects     add column if not exists stripe_customer_id text;
+alter table payment_dues add column if not exists stripe_invoice_id  text;
+alter table payment_dues add column if not exists invoice_url        text;
+alter table payment_dues add column if not exists invoiced_at        timestamptz;

@@ -10,7 +10,7 @@ import { daysUntil, todayISO } from "@/lib/reporting";
 import { STATUS_LABEL, type ProjectStatus } from "@/lib/status";
 import { restorePayment, undoPaid, undoSplit } from "@/app/actions";
 import { SplitPaymentDialog } from "@/components/split-payment-dialog";
-import { EditPaidDate, MarkPaidForm, RemovePaymentButton } from "@/components/mark-paid-form";
+import { EditPaidDate, MarkPaidForm, RemovePaymentButton, SendInvoiceButton } from "@/components/mark-paid-form";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 
 export const dynamic = "force-dynamic";
 
-type Project = { id: string; name: string; client_name: string; status: ProjectStatus } & PaymentPlan;
+type Project = { id: string; name: string; client_name: string; billing_email: string | null; status: ProjectStatus } & PaymentPlan;
 
 // One client's payment history: the plan, the totals, and every payment in the ledger, newest first.
 export default async function PaymentHistoryPage({ params }: { params: Promise<{ id: string }> }) {
@@ -30,11 +30,11 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
 
   const [projectRes, ledgerRes] = await Promise.all([
     limitTo(
-      supabase.from("projects").select("id, name, client_name, status, payment_date, payment_term, payment_method, payment_amount_usd, currency").eq("id", id),
+      supabase.from("projects").select("id, name, client_name, billing_email, status, payment_date, payment_term, payment_method, payment_amount_usd, currency").eq("id", id),
       scope,
       "id"
     ).maybeSingle<Project>(),
-    supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at, split_from").eq("project_id", id).order("due_date", { ascending: false }).returns<Due[]>(),
+    supabase.from("payment_dues").select("project_id, due_date, amount_usd, currency, term, method, status, paid_at, split_from, invoiced_at, invoice_url").eq("project_id", id).order("due_date", { ascending: false }).returns<Due[]>(),
   ]);
   const error = projectRes.error ?? ledgerRes.error;
   if (error) {
@@ -177,6 +177,14 @@ export default async function PaymentHistoryPage({ params }: { params: Promise<{
                           </div>
                         ) : (
                           <div className="flex flex-wrap items-center justify-end gap-1">
+                            {d.method === "stripe_link" && (d.invoiced_at ? (
+                              <span className="mr-1 text-xs text-muted-foreground">
+                                Invoice sent {paidDate(d.invoiced_at)}
+                                {d.invoice_url && <> · <a href={d.invoice_url} target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-foreground">View</a></>}
+                              </span>
+                            ) : (
+                              <SendInvoiceButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} email={p.billing_email} />
+                            ))}
                             <MarkPaidForm projectId={p.id} dueDate={d.due_date} />
                             {!d.split_from && <SplitPaymentDialog projectId={p.id} dueDate={d.due_date} amount={d.amount_usd} currency={d.currency || "USD"} />}
                             {isAdmin && <RemovePaymentButton projectId={p.id} dueDate={d.due_date} label={formatMoney(d.amount_usd, d.currency)} />}

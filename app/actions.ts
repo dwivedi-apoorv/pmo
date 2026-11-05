@@ -11,6 +11,7 @@ import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
 import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
 import { sendEmail } from "@/lib/email";
+import { createAndSendInvoice, discardInvoice, ensureCustomer, stripeConfigured, stripeTestMode } from "@/lib/stripe";
 import { createProjectChat, linkExistingChat, unlinkProjectChat } from "@/lib/notify/project-chat";
 import { getMethod } from "@/lib/notify/send";
 import { generateCode, hashCode, isCodeShape } from "@/lib/otp";
@@ -49,6 +50,14 @@ async function runBackfill(projectId: string, payment: ReturnType<typeof parsePa
       `The project was saved, but recording the earlier payments failed: ${e instanceof Error ? e.message : "unknown error"}. Open Edit project to try again.`
     );
   }
+}
+
+/** The client's billing email, or null. Refuses something that isn't an email address. */
+function parseBillingEmail(formData: FormData): string | null {
+  const v = str(formData.get("billing_email")).toLowerCase();
+  if (!v) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new Error("Enter a valid billing email address, or leave it empty.");
+  return v;
 }
 
 function parsePayment(formData: FormData) {
@@ -173,6 +182,7 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
   const currency = normalizeCurrency(str(formData.get("currency")) || DEFAULT_CURRENCY);
   if (!currency) throw new Error("Choose a valid currency, for example USD or CAD.");
   if (access.can("payments")) await ensureCurrency(currency);
+  const billing_email = access.can("payments") ? parseBillingEmail(formData) : null;
   const { data, error } = await supabaseAdmin
     .from("projects")
     .insert({
@@ -181,7 +191,7 @@ async function createProjectCore(access: Access, formData: FormData, opts: Creat
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
-      ...(access.can("payments") ? { currency } : {}),
+      ...(access.can("payments") ? { currency, billing_email } : {}),
       ...(payment ?? {}),
     })
     .select("id")
@@ -282,6 +292,7 @@ export async function updateProject(formData: FormData) {
       website: normalizeUrl(websiteRaw),
       onboarding_date,
       reporting_date,
+      ...(payment ? { billing_email: parseBillingEmail(formData) } : {}),
       ...(payment ?? {}),
     })
     .eq("id", project_id);
@@ -587,6 +598,60 @@ export async function updatePaidDate(formData: FormData) {
 }
 
 const cents = (n: number) => Math.round(n * 100);
+
+/**
+ * "Send invoice" on a Stripe-link payment: creates the invoice in Stripe and emails it to the client's billing email.
+ * Only for an unpaid Stripe-link payment whose invoice date has come, and only once (a half-finished earlier attempt is
+ * cleaned up first). Admins and managers (payments access).
+ */
+export async function sendInvoice(projectId: string, dueDate: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const access = await requirePermission("payments");
+    requireProject(access, projectId);
+    if (!stripeConfigured()) return { ok: false, message: "Stripe isn't connected yet. Add STRIPE_SECRET_KEY in the server settings." };
+    if (!DATE_RE.test(dueDate)) return { ok: false, message: "Missing invoice date." };
+    if (dueDate > todayISO()) return { ok: false, message: "This invoice date hasn't come yet." };
+
+    const [{ data: row, error: rErr }, { data: project, error: pErr }] = await Promise.all([
+      supabaseAdmin.from("payment_dues").select("status, amount_usd, currency, method, stripe_invoice_id, invoiced_at").eq("project_id", projectId).eq("due_date", dueDate).maybeSingle(),
+      supabaseAdmin.from("projects").select("name, client_name, billing_email, stripe_customer_id").eq("id", projectId).maybeSingle(),
+    ]);
+    if (rErr) throw new Error(rErr.message);
+    if (pErr) throw new Error(pErr.message);
+    if (!row || !project) return { ok: false, message: "Payment not found." };
+    if (row.status !== "due") return { ok: false, message: "Only an unpaid payment can be invoiced." };
+    if (row.method !== "stripe_link") return { ok: false, message: "Invoices are sent for Stripe link payments only." };
+    if (row.invoiced_at) return { ok: false, message: "An invoice was already sent for this payment." };
+    if (!project.billing_email) return { ok: false, message: "Add the client's billing email first: Edit project, in the Payment section." };
+    const amount = Number(row.amount_usd);
+    if (!(amount > 0)) return { ok: false, message: "The payment amount is zero." };
+    const currency = ((row.currency as string | null) || "USD").toUpperCase();
+
+    // A half-finished earlier attempt (the draft was created but not sent) is cleared so nothing is invoiced twice.
+    if (row.stripe_invoice_id) {
+      if (!(await discardInvoice(row.stripe_invoice_id as string))) return { ok: false, message: "That invoice is already paid in Stripe. Mark the payment as paid here." };
+      await supabaseAdmin.from("payment_dues").update({ stripe_invoice_id: null }).eq("project_id", projectId).eq("due_date", dueDate);
+    }
+
+    const customerId = await ensureCustomer(project.stripe_customer_id as string | null, project.client_name as string, project.billing_email as string, projectId);
+    if (customerId !== project.stripe_customer_id) await supabaseAdmin.from("projects").update({ stripe_customer_id: customerId }).eq("id", projectId);
+
+    const invoice = await createAndSendInvoice({
+      customerId, amount, currency, projectId, dueDate,
+      description: `${project.name as string} (invoice date ${dueDate})`,
+      recordId: async (id) => { await supabaseAdmin.from("payment_dues").update({ stripe_invoice_id: id }).eq("project_id", projectId).eq("due_date", dueDate); },
+    });
+    const { error } = await supabaseAdmin.from("payment_dues").update({ stripe_invoice_id: invoice.id, invoice_url: invoice.url, invoiced_at: new Date().toISOString() }).eq("project_id", projectId).eq("due_date", dueDate);
+    if (error) throw new Error(`The invoice was sent but couldn't be saved here: ${error.message}. Invoice id ${invoice.id}.`);
+
+    const name = await projectLabel(projectId);
+    await logActivity({ actor: access.user, group: "payment", action: "invoice_sent", projectId, projectName: name, summary: `${firstName(access.user.name)} sent a ${money(amount, currency)} Stripe invoice for ${name} (invoice date ${dueDate}) to ${project.billing_email}${stripeTestMode() ? " [test mode]" : ""}` });
+    revalidatePath("/payments");
+    return { ok: true, message: `Invoice sent to ${project.billing_email}${stripeTestMode() ? " (Stripe test mode: no real email goes out)" : ""}.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
 
 /**
  * Splits an unpaid payment into 2-3 installments, each with its own invoice date. The first installment keeps the

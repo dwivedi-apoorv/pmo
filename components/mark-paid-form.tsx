@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { markPaid, removePayment, updatePaidDate } from "@/app/actions";
+import { useState, useTransition } from "react";
+import { markPaid, removePayment, sendInvoice, updatePaidDate } from "@/app/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -66,5 +66,28 @@ export function RemovePaymentButton({ projectId, dueDate, label }: { projectId: 
       <input type="hidden" name="due_date" value={dueDate} />
       <Button type="submit" size="sm" variant="ghost" className="text-destructive hover:text-destructive">Remove</Button>
     </form>
+  );
+}
+
+// "Send invoice": creates the Stripe invoice and emails it to the client, after a confirmation.
+export function SendInvoiceButton({ projectId, dueDate, label, email }: { projectId: string; dueDate: string; label: string; email: string | null }) {
+  const [pending, startTransition] = useTransition();
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  return (
+    <span className="inline-flex flex-col items-end gap-0.5">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={pending}
+        onClick={() => {
+          if (!window.confirm(`Create and email a ${label} Stripe invoice (invoice date ${dueDate}) to ${email ?? "the client"}?\n\nThis sends a real email to the client unless Stripe is in test mode.`)) return;
+          startTransition(async () => setResult(await sendInvoice(projectId, dueDate)));
+        }}
+      >
+        {pending ? "Sending…" : "Send invoice"}
+      </Button>
+      {result && <span role="status" className={`max-w-56 text-right text-xs ${result.ok ? "text-muted-foreground" : "text-destructive"}`}>{result.message}</span>}
+    </span>
   );
 }

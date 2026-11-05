@@ -54,6 +54,7 @@ type Project = {
   onboarding_date: string;
   reporting_date: string;
   created_at: string;
+  billing_email?: string | null;
   status: ProjectStatus;
   project_manager_id: string | null;
   project_assignments: { employees: EmployeeOption | null }[];
@@ -96,7 +97,7 @@ export default async function ProjectsPage({
       supabase
         .from("projects")
         .select(
-          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, currency, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
+          "id, name, client_name, website, onboarding_date, reporting_date, created_at, payment_date, payment_term, payment_method, payment_amount_usd, currency, billing_email, status, project_manager_id, project_assignments(employees(id, name, role)), project_services(services(id, name))"
         )
         .order("reporting_date", { ascending: true }),
       scope,
@@ -143,7 +144,7 @@ export default async function ProjectsPage({
     : sort === "payment" ? (nextPaymentDate(p) ?? "9999-12-31") // no upcoming payment sorts last
     : nextReportDate(p.reporting_date);
   // People who can't see payments never get the payment details: they're blanked here, before anything is shown.
-  const allProjects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null }));
+  const allProjects = (projectsRes.data ?? []).map((p) => (canPay ? p : { ...p, payment_date: null, payment_term: null, payment_method: null, payment_amount_usd: null, billing_email: null }));
   // At risk: an ACTIVE project with an overdue report or an overdue payment.
   const activeProjects = allProjects.filter((p) => p.status === "active");
   const risk = riskByProject(
@@ -446,6 +447,7 @@ export default async function ProjectsPage({
                           payment_method: p.payment_method,
                           payment_amount_usd: p.payment_amount_usd,
                           currency: p.currency,
+                          billing_email: p.billing_email,
                         }}
                         managers={managerOptions}
                         people={peopleOptions}

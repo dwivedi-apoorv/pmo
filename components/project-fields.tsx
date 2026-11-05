@@ -17,6 +17,7 @@ export type ProjectValues = {
   website: string | null;
   onboarding_date: string;
   reporting_date: string;
+  billing_email?: string | null;
 } & PaymentPlan;
 
 // Shared by the create and edit dialogs so the two never drift apart.
@@ -149,6 +150,13 @@ export function ProjectFields({ values, showPayment = true, currencies = ["USD",
               required
             />
           </div>
+        </div>
+        <div className="grid gap-1.5 sm:max-w-sm">
+          <Label htmlFor="billing_email">
+            Client billing email <span className="text-muted-foreground">(optional)</span>
+          </Label>
+          <Input id="billing_email" name="billing_email" type="email" defaultValue={values?.billing_email ?? ""} placeholder="billing@client.com" />
+          <p className="text-xs text-muted-foreground">Where Stripe invoices are emailed, for Stripe link payments.</p>
         </div>
         <p className="text-xs text-muted-foreground">
           Monthly, quarterly and biannual payments repeat on the same day as the invoice date. One-off is

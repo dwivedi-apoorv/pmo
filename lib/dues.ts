@@ -20,6 +20,8 @@ export type Due = {
   method: PaymentMethod | null;
   status: "due" | "paid" | "void"; // void = removed by an admin; kept so the monthly job doesn't open it again
   paid_at: string | null;
+  invoiced_at?: string | null; // when a Stripe invoice was sent for it
+  invoice_url?: string | null;
   split_from?: string | null; // the original date when this payment is an installment of a split
 };
 
