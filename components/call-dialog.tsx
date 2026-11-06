@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SimpleSelect } from "@/components/simple-select";
-import { WEEKDAYS } from "@/lib/calls";
+import { WEEKDAYS, WORKDAYS } from "@/lib/calls";
 import { deleteCall, saveCall } from "@/app/actions";
 
 export type CallValues = { id: string; project_id: string; weekday: number; call_time: string; duration_min: number | null; link: string | null; notes: string | null };
@@ -66,7 +66,7 @@ export function CallDialog({ projects, call, label }: { projects: { value: strin
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-1.5">
                 <Label>Day</Label>
-                <SimpleSelect name="weekday" options={WEEKDAYS} defaultValue={call ? String(call.weekday) : null} placeholder="Select day" required onValueChange={setWeekday} />
+                <SimpleSelect name="weekday" options={call && call.weekday > 5 ? WEEKDAYS : WORKDAYS} defaultValue={call ? String(call.weekday) : null} placeholder="Select day" required onValueChange={setWeekday} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="call-time">Time (IST)</Label>

@@ -9,6 +9,9 @@ export const WEEKDAYS = [
   { value: "7", label: "Sunday" },
 ] as const;
 
+/** Calls are booked Monday to Friday. */
+export const WORKDAYS = WEEKDAYS.slice(0, 5);
+
 export type Call = {
   id: string;
   project_id: string;
