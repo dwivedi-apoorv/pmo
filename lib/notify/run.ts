@@ -9,6 +9,8 @@ import type { Notice } from "@/lib/notify/notice";
 import type { ProjectStatus } from "@/lib/status";
 import { assignedNotice, paymentPaidNotice, reportNudgeNotice, statusChangedNotice, teamChangedNotice, type AssignedProject } from "@/lib/notify/project";
 import { Sender, getDisabledKinds, type Recipient } from "@/lib/notify/send";
+import { callsNotice, type TodaysCall } from "@/lib/notify/calls";
+import { isoWeekday } from "@/lib/calls";
 
 export type DigestRun = { method: string; people: number; nudged: number; sent: number; failed: number; skipped: number; alreadySent: number; failures: string[] };
 
@@ -25,7 +27,7 @@ export async function logRun(run: DigestRun | { error: string }) {
           ? "Delivery is switched off in General settings, so nothing was sent."
           : run.people === 0 && run.nudged === 0
             ? "Nobody has a report or payment that needs attention today, so no messages were needed."
-            : `${run.sent} summaries sent, ${run.nudged} report reminders, ${run.failed} failed, ${run.alreadySent} already sent today.`;
+            : `${run.sent} summaries sent, ${run.nudged} reminders, ${run.failed} failed, ${run.alreadySent} already sent today.`;
     await supabaseAdmin.from("notification_log").insert({
       kind: "digest",
       employee_name: "Morning job",
@@ -112,6 +114,34 @@ async function runDigestInner(opts: { force?: boolean }): Promise<DigestRun> {
         if (result.ok) run.nudged++;
         else if (!result.skipped) run.failures.push(`${n.m.name} (reminder): ${result.detail ?? "failed"}`);
       }
+    }
+  }
+
+  // Today's weekly client calls, one message per manager. Off unless switched on under Notifications.
+  if (!(await getDisabledKinds()).has("call_reminders")) {
+    const today = todayISO();
+    const { data: calls } = await supabaseAdmin
+      .from("client_calls")
+      .select("call_time, duration_min, link, projects!inner(name, client_name, status, project_manager_id)")
+      .eq("weekday", isoWeekday(today))
+      .eq("projects.status", "active");
+    const byManager = new Map<string, TodaysCall[]>();
+    for (const c of (calls ?? []) as any[]) {
+      const p = Array.isArray(c.projects) ? c.projects[0] : c.projects;
+      if (!p?.project_manager_id) continue;
+      const list = byManager.get(p.project_manager_id) ?? [];
+      list.push({ project: p.name, client: p.client_name, time: (c.call_time as string).slice(0, 5), duration_min: c.duration_min, link: c.link });
+      byManager.set(p.project_manager_id, list);
+    }
+    for (const [managerId, list] of byManager) {
+      const m = employees.find((e) => e.id === managerId);
+      if (!m || !canMessage(m)) continue;
+      const notice = callsNotice(today, list.sort((a, b) => a.time.localeCompare(b.time)));
+      const { data: sent } = await supabaseAdmin.from("notification_log").select("id").eq("kind", "nudge").eq("status", "sent").eq("employee_id", m.id).eq("summary", notice.title).limit(1);
+      if (!opts.force && sent?.length) continue;
+      const result = await sender.send({ id: m.id, name: m.name, email: m.email }, notice, "nudge");
+      if (result.ok) run.nudged++;
+      else if (!result.skipped) run.failures.push(`${m.name} (calls): ${result.detail ?? "failed"}`);
     }
   }
 

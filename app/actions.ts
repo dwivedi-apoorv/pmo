@@ -9,7 +9,8 @@ import { backfillPaidPayments, openDuesForMonth } from "@/lib/open-dues";
 import { todayISO } from "@/lib/reporting";
 import { isProjectStatus, reasonRequired } from "@/lib/status";
 import { isNoteKind } from "@/lib/notes";
-import { requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
+import { getAccess, requireAdmin, requirePermission, requireProject, type Access } from "@/lib/access";
+import { TIME_RE } from "@/lib/calls";
 import { sendEmail } from "@/lib/email";
 import { createAndSendInvoice, discardInvoice, ensureCustomer, stripeConfigured, stripeTestMode } from "@/lib/stripe";
 import { createProjectChat, linkExistingChat, unlinkProjectChat } from "@/lib/notify/project-chat";
@@ -1259,6 +1260,64 @@ export async function createProjectChatNow(projectId: string): Promise<{ ok: boo
     const r = await createProjectChat(projectId, access.user);
     revalidatePath("/projects");
     return r;
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+/** May this person add or change calls for the project? Admins any; managers only the projects they manage. */
+async function requireCallAccess(projectId: string) {
+  const access = await getAccess();
+  if (!access) throw new Error("Please sign in again.");
+  requireProject(access, projectId);
+  if (access.role !== "admin") {
+    const { data } = await supabaseAdmin.from("projects").select("project_manager_id").eq("id", projectId).maybeSingle();
+    if (!data || data.project_manager_id !== access.user.id) throw new Error("Only the project's manager (or an admin) can change its calls.");
+  }
+}
+
+/** Adds a weekly client call, or changes one when `id` is given. Times are India time. */
+export async function saveCall(input: { id?: string; projectId: string; weekday: number; time: string; duration: number | null; link: string; notes: string }): Promise<{ ok: boolean; message: string }> {
+  try {
+    if (!input.projectId) return { ok: false, message: "Choose a project." };
+    if (!Number.isInteger(input.weekday) || input.weekday < 1 || input.weekday > 7) return { ok: false, message: "Choose a weekday." };
+    if (!TIME_RE.test(input.time)) return { ok: false, message: "Enter a time." };
+    const duration = input.duration == null || Number.isNaN(input.duration) ? null : Math.round(input.duration);
+    if (duration !== null && (duration < 1 || duration > 600)) return { ok: false, message: "Duration should be between 1 and 600 minutes." };
+    const link = input.link.trim();
+    if (link) {
+      try { if (!new URL(normalizeUrl(link)).hostname.includes(".")) throw new Error(); } catch { return { ok: false, message: "That meeting link doesn't look right." }; }
+    }
+    const notes = input.notes.trim().slice(0, 500);
+
+    await requireCallAccess(input.projectId);
+    const row = { project_id: input.projectId, weekday: input.weekday, call_time: input.time, duration_min: duration, link: link ? normalizeUrl(link) : null, notes: notes || null };
+    if (input.id) {
+      const { data: old } = await supabaseAdmin.from("client_calls").select("project_id").eq("id", input.id).maybeSingle();
+      if (!old) return { ok: false, message: "That call no longer exists." };
+      if (old.project_id !== input.projectId) await requireCallAccess(old.project_id as string);
+      const { error } = await supabaseAdmin.from("client_calls").update(row).eq("id", input.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabaseAdmin.from("client_calls").insert(row);
+      if (error) throw new Error(error.message);
+    }
+    revalidatePath("/calls");
+    return { ok: true, message: "Saved." };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
+  }
+}
+
+export async function deleteCall(id: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const { data: old } = await supabaseAdmin.from("client_calls").select("project_id").eq("id", id).maybeSingle();
+    if (!old) return { ok: true, message: "Deleted." };
+    await requireCallAccess(old.project_id as string);
+    const { error } = await supabaseAdmin.from("client_calls").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    revalidatePath("/calls");
+    return { ok: true, message: "Deleted." };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "Something went wrong." };
   }

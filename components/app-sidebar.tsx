@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { ActivityIcon, BellIcon, BriefcaseIcon, ChevronDownIcon,  FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
+import { ActivityIcon, BellIcon, BriefcaseIcon, ChevronDownIcon,  FileTextIcon, FolderKanbanIcon, LayoutDashboardIcon, PhoneIcon, LogOutIcon, SettingsIcon, ShieldCheckIcon, TrendingUpIcon, UserRoundPlusIcon, UsersIcon, WalletIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -31,6 +31,7 @@ const PAGES = [
     { title: "Month by month", href: "/payments/monthly" },
   ] },
   { title: "Reports", href: "/reports", icon: FileTextIcon },
+  { title: "Calls", href: "/calls", icon: PhoneIcon },
   { title: "Onboarding", href: "/onboarding", icon: UserRoundPlusIcon },
   { title: "Employees", href: "/people", icon: UsersIcon },
   { title: "Insights", href: "/insights", icon: TrendingUpIcon },

@@ -47,7 +47,7 @@ export type SentInvoice = { id: string; url: string | null };
 
 /**
  * Creates an invoice for one payment, adds the line, finalizes it and emails it to the client.
- * Stripe emails the client an invoice with a pay-online link. Due in `daysUntilDue` days (Stripe needs one).
+ * Stripe emails the client an invoice with a pay-online link. Due on receipt by default (0 days): the invoice is created on its invoice date, which is when it falls due. Stripe needs a due period on emailed invoices.
  * `recordId` is called as soon as the draft exists, so a half-finished attempt can be found and cleaned up.
  */
 export async function createAndSendInvoice(opts: {
@@ -58,7 +58,7 @@ export async function createAndSendInvoice(opts: {
   const invoice = await call("POST", "/invoices", {
     customer: opts.customerId,
     collection_method: "send_invoice",
-    days_until_due: String(opts.daysUntilDue ?? 7),
+    days_until_due: String(opts.daysUntilDue ?? 0),
     auto_advance: "false",
     currency: opts.currency.toLowerCase(),
     "metadata[project_id]": opts.projectId,

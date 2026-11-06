@@ -38,6 +38,7 @@ export const NOTIFICATION_KINDS = [
   { key: "payment_paid", title: "Payment received", text: "Sent to the project's manager when a payment is marked as paid." },
   { key: "report_nudge", title: "Overdue report reminder", text: "Sent to the project's manager the morning after a report was due and still isn't marked as sent (and again for up to 3 days)." },
   { key: "error_alerts", title: "Error alerts", text: "An email to the admins when the morning job fails or Teams messages can't be delivered, at most once every 6 hours for the same problem." },
+  { key: "call_reminders", title: "Client call reminders", text: "Sent in the morning to the project's manager, listing that day's weekly client calls (India time). Off by default." },
   { key: "team_changed", title: "Team or manager changed", text: "Sent to everyone already on a project when its manager or team changes, saying who was added or removed." },
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]["key"];
